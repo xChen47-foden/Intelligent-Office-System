@@ -1,0 +1,86 @@
+{
+  "setting": {
+    "theme": { "title": "主题风格", "list": ["浅色", "深色", "系统"] },
+    "menuType": { "title": "菜单布局", "list": ["垂直", "水平", "混合", "双列"] },
+    "menu": { "title": "菜单风格" },
+    "color": { "title": "系统主题色" },
+    "box": { "title": "盒子样式", "list": ["边框", "阴影"] },
+    "container": { "title": "容器宽度" },
+    "basics": { "title": "基础配置", "list": ["手风琴菜单", "显示菜单按钮", "显示刷新按钮", "显示面包屑", "显示工作台", "显示语言切换", "显示进度条", "色弱模式", "自动关闭", "显示水印", "菜单宽度", "xxx", "xxx", "标签风格"] }
+  },
+  "dashboard": {
+    "welcomeTitle": "欢迎使用智能办公系统",
+    "welcomeDesc": "为您提供高效、智能的办公体验"
+  },
+  "topBar": {
+    "user": {
+      "userCenter": "个人中心",
+      "lockScreen": "锁屏",
+      "logout": "退出登录"
+    }
+  },
+  "menus": {
+    "system": {
+      "title": "系统管理",
+      "userCenter": "个人中心"
+    }
+  },
+  "common": {
+    "tips": "提示",
+    "logOutTips": "确定要退出登录吗？",
+    "cancel": "取消",
+    "confirm": "确定"
+  },
+  "login": {
+    "title": "智能办公助手登录",
+    "subTitle": "欢迎登录智能办公助手系统",
+    "leftView": {
+      "title": "智能办公助手",
+      "subTitle": "高效、智能、安全的办公体验"
+    },
+    "rememberPwd": "记住密码",
+    "forgetPwd": "忘记密码？",
+    "noAccount": "还没有账号？",
+    "register": "立即注册",
+    "btnText": "登录",
+    "sliderText": "请向右滑动验证",
+    "account": "账号",
+    "password": "密码",
+    "department": "部门",
+    "placeholder": ["请输入账号", "请输入密码"],
+    "success": { "title": "登录成功", "message": "欢迎回来" },
+    "sliderSuccessText": "验证通过"
+  },
+  "register": {
+    "title": "注册新账号",
+    "subTitle": "欢迎注册智能办公助手系统",
+    "placeholder": ["请输入邮箱", "请输入密码", "请确认密码"],
+    "agreeText": "我已阅读并同意",
+    "privacyPolicy": "《隐私政策》",
+    "submitBtnText": "注册",
+    "hasAccount": "已有账号？",
+    "toLogin": "去登录",
+    "rule": [
+      "请输入正确的邮箱地址",
+      "请输入验证码",
+      "用户名长度为3-20位",
+      "密码长度至少为6位",
+      "两次输入的密码不一致"
+    ]
+  },
+  "lockScreen": {
+    "lock": {
+      "btnText": "解锁"
+    },
+    "unlock": {
+      "btnText": "解锁",
+      "backBtnText": "返回登录"
+    }
+  },
+  "notice": {
+    "title": "通知中心",
+    "btnRead": "全部已读",
+    "bar": ["通知", "消息", "待办"],
+    "viewAll": "查看全部"
+  }
+} 

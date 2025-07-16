@@ -1,0 +1,21 @@
+{
+  "1": [
+    {
+      "group_id": 1,
+      "user_id": 5,
+      "content": "313131",
+      "sender_name": "laq",
+      "avatar": "",
+      "time": "2025-07-02 13:47:09"
+    },
+    {
+      "group_id": 1,
+      "user_id": 2,
+      "content": "3131",
+      "type": "text",
+      "sender_name": "钱星晨",
+      "avatar": "/uploads/avatar/2.jpg",
+      "time": "2025-07-05 13:38:18"
+    }
+  ]
+}

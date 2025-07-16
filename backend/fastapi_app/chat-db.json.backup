@@ -1,0 +1,131 @@
+{
+  "rooms": {
+    "user_2": [
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "3131",
+        "time": "2025-07-05T03:07:41.123Z"
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "/uploads/images/chat_2_1751690410.jpg",
+        "type": "image",
+        "time": "2025-07-05T04:40:10.882Z"
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "/uploads/images/chat_2_1751690561.jpg",
+        "type": "image",
+        "time": "2025-07-05T04:42:41.807Z"
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "/uploads/images/chat_2_1751690911.png",
+        "type": "image",
+        "time": "2025-07-05T04:48:31.122Z"
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "🖤",
+        "time": "2025-07-05T05:14:08.636Z"
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "😀",
+        "time": "2025-07-05T05:21:25.041Z"
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "😀",
+        "time": "2025-07-05T05:23:56.001Z"
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "😮😶‍🌫️",
+        "time": "2025-07-05T05:38:05.783Z"
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "3131😏🫡",
+        "time": "2025-07-05T05:38:12.956Z"
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "312",
+        "time": "2025-07-06T03:20:30.215Z",
+        "id": 1751772030215,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "31231312",
+        "time": "2025-07-06T03:21:31.544Z",
+        "id": 1751772091544,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 4,
+        "content": "31",
+        "time": "2025-07-06T03:24:16.602Z",
+        "id": 1751772256602,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 4,
+        "content": "4242",
+        "time": "2025-07-06T03:24:54.710Z",
+        "id": 1751772294710,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 4,
+        "content": "3131",
+        "time": "2025-07-06T03:25:24.398Z",
+        "id": 1751772324398,
+        "is_read": 1
+      }
+    ],
+    "user_3": [
+      {
+        "from_user_id": 3,
+        "to_user_id": 2,
+        "content": "31",
+        "time": "2025-07-06T03:21:50.838Z",
+        "id": 1751772110839,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 3,
+        "to_user_id": 2,
+        "content": "大苏打大",
+        "time": "2025-07-06T03:23:57.774Z",
+        "id": 1751772237774,
+        "is_read": 1
+      }
+    ],
+    "user_4": [
+      {
+        "from_user_id": 4,
+        "to_user_id": 2,
+        "content": "31313",
+        "time": "2025-07-06T03:25:50.104Z",
+        "id": 1751772350104,
+        "is_read": 1
+      }
+    ]
+  }
+}

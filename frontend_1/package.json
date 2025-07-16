@@ -1,0 +1,123 @@
+{
+  "name": "qxc-office-app",
+  "version": "1.0.0",
+  "description": "基于大模型的智能办公应用软件",
+  "main": "dist_electron/index.js",
+  "homepage": "./",
+  "author": "QXC Team",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron": "electron .",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3006 && electron .\"",
+    "electron:build": "npm run build && electron-builder",
+    "electron:build-win": "npm run build && electron-builder --win",
+    "preelectron-pack": "npm run build",
+    "postinstall": "electron-builder install-app-deps",
+    "build:all": "npm run build && node build.js"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.2",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "concurrently": "^8.0.0",
+    "electron": "^25.0.0",
+    "electron-builder": "^24.0.0",
+    "terser": "^5.43.1",
+    "unplugin-auto-import": "^19.3.0",
+    "unplugin-vue-components": "^28.8.0",
+    "vite": "^6.3.5",
+    "vite-plugin-compression": "^0.5.1",
+    "wait-on": "^7.0.0"
+  },
+  "build": {
+    "appId": "com.qxc.office.app",
+    "productName": "QXC智能办公",
+    "directories": {
+      "output": "dist_installer"
+    },
+    "files": [
+      "dist/**/*",
+      "electron-main.js",
+      "preload.js",
+      "backend/fastapi_app/**/*",
+      "backend/uploads/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/",
+        "to": "backend/"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/favicon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "public/favicon.ico",
+      "uninstallerIcon": "public/favicon.ico",
+      "installerHeaderIcon": "public/favicon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "license": "LICENSE.txt"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "public/favicon.ico"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/favicon.ico"
+    }
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "@vueuse/core": "^13.5.0",
+    "axios": "^1.10.0",
+    "default-passive-events": "^4.0.0",
+    "echarts": "^5.6.0",
+    "element-plus": "^2.10.3",
+    "file-saver": "^2.0.5",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.22",
+    "markdown-it": "^14.1.0",
+    "markdown-it-katex": "^2.0.3",
+    "nprogress": "^0.2.0",
+    "pinia": "^3.0.3",
+    "qrcode.vue": "^3.6.0",
+    "sass": "^1.89.2",
+    "vue": "^3.5.17",
+    "vue-demi": "^0.14.10",
+    "vue-draggable-plus": "^0.6.0",
+    "vue-i18n": "^11.1.9",
+    "vue-router": "^4.5.1",
+    "vue3-count-to": "^1.1.2",
+    "xlsx": "^0.18.5"
+  }
+}

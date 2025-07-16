@@ -1,0 +1,122 @@
+[
+  {
+    "id": 1,
+    "docId": 1,
+    "filename": "员工手册2024版.pdf",
+    "title": "员工手册2024版",
+    "content": "第一章 公司简介\n我们致力于创造一个开放、包容、创新的工作环境。\n\n第二章 员工权利与义务\n1. 员工享有平等的工作机会和发展空间\n2. 员工应遵守公司规章制度\n3. 维护公司形象和商业机密\n\n第三章 考勤管理\n工作时间：上午9:00-12:00，下午13:30-18:00\n请假制度：需提前申请，获得主管批准\n\n第四章 薪酬福利\n薪资结构包括基本工资、绩效奖金、年终奖等\n福利包括五险一金、带薪年假、节日福利等",
+    "type": "pdf",
+    "knowledge_base": "rule",
+    "upload_time": "2024-01-15 09:00:00"
+  },
+  {
+    "id": 2,
+    "docId": 2,
+    "filename": "信息安全管理制度.docx",
+    "title": "信息安全管理制度",
+    "content": "第一条 为规范公司信息安全管理，保护公司信息资产安全，制定本制度。\n\n第二条 适用范围\n本制度适用于公司所有员工、合作伙伴及访客。\n\n第三条 密码管理\n1. 密码长度不少于8位\n2. 必须包含大小写字母、数字和特殊字符\n3. 定期更换密码，不得重复使用\n\n第四条 网络安全\n1. 禁止访问非工作相关网站\n2. 不得下载未知来源软件\n3. 发现安全威胁及时报告\n\n第五条 数据保护\n1. 客户数据严格保密\n2. 定期备份重要数据\n3. 离职时交还所有数据资料",
+    "type": "docx",
+    "knowledge_base": "rule",
+    "upload_time": "2024-02-01 14:30:00"
+  },
+  {
+    "id": 3,
+    "docId": 3,
+    "filename": "智能办公系统需求分析.docx",
+    "title": "智能办公系统需求分析",
+    "content": "1. 项目背景\n随着人工智能技术的快速发展，智能办公系统成为提高工作效率的重要工具。\n\n2. 功能需求\n2.1 文档智能处理\n- 自动文档分类和标签\n- 智能内容摘要生成\n- 文档相似度检测\n\n2.2 智能助手功能\n- 自然语言问答\n- 工作日程智能安排\n- 邮件智能回复建议\n\n2.3 会议管理\n- 会议纪要自动生成\n- 语音转文字\n- 智能会议提醒\n\n3. 技术架构\n- 前端：Vue3 + TypeScript\n- 后端：FastAPI + Python\n- 数据库：PostgreSQL\n- AI模型：GPT-4, BERT\n\n4. 项目计划\n第一阶段：基础功能开发（2个月）\n第二阶段：AI功能集成（1个月）\n第三阶段：测试和优化（1个月）",
+    "type": "docx",
+    "knowledge_base": "project",
+    "upload_time": "2024-03-10 10:15:00"
+  },
+  {
+    "id": 4,
+    "docId": 4,
+    "filename": "软件杯大赛项目方案.pptx",
+    "title": "基于大模型的智能办公应用软件",
+    "content": "项目概述\n基于大语言模型技术，开发智能办公应用软件，提升办公效率和用户体验。\n\n技术亮点\n1. 集成GPT大模型，提供智能对话功能\n2. 文档智能处理和知识管理\n3. 会议智能化管理\n4. 多模态交互界面\n\n创新点\n- 知识库智能问答系统\n- 多人协同编辑功能\n- 智能日程安排助手\n- 语音识别与合成\n\n预期成果\n提高办公效率30%以上，减少重复性工作，增强团队协作能力。\n\n市场前景\n智能办公市场规模预计2025年达到500亿元，具有广阔发展前景。",
+    "type": "pptx",
+    "knowledge_base": "project",
+    "upload_time": "2024-04-05 16:20:00"
+  },
+  {
+    "id": 5,
+    "docId": 5,
+    "filename": "软件开发合同模板.pdf",
+    "title": "软件开发合同模板",
+    "content": "甲方（委托方）：___________\n乙方（开发方）：___________\n\n第一条 项目概述\n乙方接受甲方委托，开发___________软件系统。\n\n第二条 开发内容\n1. 需求分析和系统设计\n2. 编码实现和单元测试\n3. 系统集成和测试\n4. 用户培训和文档交付\n\n第三条 开发周期\n项目开发周期为_____个月，自合同签署之日起计算。\n\n第四条 费用条款\n项目总费用为人民币_____元，支付方式：\n- 合同签署后支付30%\n- 系统测试完成后支付50%\n- 项目验收通过后支付20%\n\n第五条 知识产权\n软件著作权归甲方所有，乙方保留技术方案的使用权。\n\n第六条 保密条款\n双方应对涉及的商业秘密和技术信息严格保密。\n\n第七条 违约责任\n任何一方违约应承担相应的法律责任和经济损失。",
+    "type": "pdf",
+    "knowledge_base": "contract",
+    "upload_time": "2024-02-20 11:45:00"
+  },
+  {
+    "id": 6,
+    "docId": 6,
+    "filename": "服务协议标准条款.docx",
+    "title": "服务协议标准条款",
+    "content": "第一章 总则\n第一条 为规范服务提供和使用，保护双方合法权益，制定本协议。\n\n第二章 服务内容\n第二条 服务范围\n1. 软件技术支持服务\n2. 系统维护和升级\n3. 用户培训服务\n4. 7*24小时技术咨询\n\n第三条 服务标准\n1. 响应时间：2小时内响应\n2. 解决时间：一般问题24小时内解决\n3. 系统可用性：99.9%以上\n\n第三章 双方权利义务\n第四条 服务方义务\n1. 按约定提供服务\n2. 保护客户信息安全\n3. 及时响应和处理问题\n\n第五条 客户义务\n1. 配合服务方工作\n2. 按时支付服务费用\n3. 合理使用服务资源\n\n第四章 费用和支付\n第六条 服务费用按年度收取，标准为_____元/年。\n\n第五章 协议变更和终止\n第七条 协议变更需双方书面同意。\n第八条 任何一方可提前30天书面通知终止协议。",
+    "type": "docx",
+    "knowledge_base": "contract",
+    "upload_time": "2024-03-15 14:00:00"
+  },
+  {
+    "id": 7,
+    "docId": 7,
+    "filename": "Vue3开发规范.md",
+    "title": "Vue3开发规范",
+    "content": "# Vue3 开发规范\n\n## 1. 项目结构\n```\nsrc/\n├── api/          # API接口\n├── components/   # 组件\n├── views/        # 页面\n├── utils/        # 工具函数\n├── store/        # 状态管理\n└── router/       # 路由配置\n```\n\n## 2. 命名规范\n- 组件名使用PascalCase\n- 文件名使用kebab-case\n- 变量名使用camelCase\n- 常量使用UPPER_SNAKE_CASE\n\n## 3. Composition API 使用\n```javascript\n// 推荐写法\nconst count = ref(0)\nconst doubled = computed(() => count.value * 2)\n\n// 避免在模板中使用复杂逻辑\nconst isValid = computed(() => {\n  return form.value.name && form.value.email\n})\n```\n\n## 4. TypeScript 规范\n- 所有API接口定义类型\n- 组件props必须定义类型\n- 避免使用any类型\n\n## 5. 样式规范\n- 使用scoped样式\n- CSS变量优先于硬编码值\n- 响应式设计考虑移动端\n\n## 6. 测试规范\n- 组件必须包含单元测试\n- API调用需要mock测试\n- 关键业务逻辑100%覆盖",
+    "type": "md",
+    "knowledge_base": "tech",
+    "upload_time": "2024-01-20 09:30:00"
+  },
+  {
+    "id": 8,
+    "docId": 8,
+    "filename": "FastAPI最佳实践.pdf",
+    "title": "FastAPI最佳实践",
+    "content": "第一章 FastAPI简介\nFastAPI是一个现代、高性能的Python Web框架，基于标准Python类型提示。\n\n第二章 项目结构\n推荐的FastAPI项目结构：\n```\napp/\n├── main.py\n├── models/\n├── routers/\n├── services/\n└── utils/\n```\n\n第三章 依赖注入\nFastAPI的依赖注入系统非常强大：\n```python\nfrom fastapi import Depends\n\ndef get_db():\n    db = SessionLocal()\n    try:\n        yield db\n    finally:\n        db.close()\n\n@app.get(\"/users/\")\ndef read_users(db: Session = Depends(get_db)):\n    return crud.get_users(db)\n```\n\n第四章 数据验证\n使用Pydantic进行数据验证：\n```python\nfrom pydantic import BaseModel\n\nclass User(BaseModel):\n    name: str\n    email: str\n    age: int = None\n```\n\n第五章 异步编程\nFastAPI原生支持异步编程：\n```python\n@app.get(\"/async-endpoint\")\nasync def async_endpoint():\n    result = await some_async_operation()\n    return result\n```\n\n第六章 错误处理\n统一的错误处理机制：\n```python\nfrom fastapi import HTTPException\n\n@app.exception_handler(ValueError)\nasync def value_error_handler(request, exc):\n    return JSONResponse(\n        status_code=400,\n        content={\"message\": str(exc)}\n    )\n```",
+    "type": "pdf",
+    "knowledge_base": "tech",
+    "upload_time": "2024-02-10 15:45:00"
+  },
+  {
+    "id": 9,
+    "docId": 9,
+    "filename": "新员工入职培训手册.pptx",
+    "title": "新员工入职培训手册",
+    "content": "欢迎加入我们的团队！\n\n第一部分：公司介绍\n- 公司历史与发展\n- 企业文化与价值观\n- 组织架构与团队介绍\n- 公司愿景与战略目标\n\n第二部分：制度培训\n- 考勤管理制度\n- 休假制度说明\n- 薪酬福利体系\n- 绩效考核标准\n\n第三部分：工作流程\n- 日常工作流程\n- 项目管理流程\n- 沟通协作机制\n- 问题反馈渠道\n\n第四部分：技能培训\n- 办公软件使用\n- 专业技能要求\n- 安全操作规范\n- 应急处理流程\n\n第五部分：职业发展\n- 晋升通道介绍\n- 培训发展机会\n- 导师制度说明\n- 个人发展规划\n\n培训目标：\n帮助新员工快速融入团队，掌握必要技能，明确职业发展方向。",
+    "type": "pptx",
+    "knowledge_base": "training",
+    "upload_time": "2024-01-05 08:00:00"
+  },
+  {
+    "id": 10,
+    "docId": 10,
+    "filename": "前端技术培训课程.docx",
+    "title": "前端技术培训课程",
+    "content": "前端技术培训大纲\n\n第一周：基础知识\n1. HTML5语义化标签\n2. CSS3新特性与应用\n3. JavaScript ES6+语法\n4. 响应式设计原理\n\n第二周：框架学习\n1. Vue3 Composition API\n2. TypeScript基础\n3. 组件化开发思想\n4. 状态管理（Pinia）\n\n第三周：工程化工具\n1. Vite构建工具\n2. ESLint代码检查\n3. Prettier代码格式化\n4. Git版本控制\n\n第四周：项目实战\n1. 项目需求分析\n2. 架构设计与搭建\n3. 功能模块开发\n4. 测试与部署\n\n培训方式：\n- 理论讲解 + 实际操作\n- 代码Review + 问题讨论\n- 项目实战 + 经验分享\n\n考核方式：\n- 每周技术测试\n- 项目作品评估\n- 团队协作表现\n\n预期成果：\n学员能够独立完成前端项目开发，掌握现代前端开发技术栈。",
+    "type": "docx",
+    "knowledge_base": "training",
+    "upload_time": "2024-03-01 10:00:00"
+  },
+  {
+    "id": 11,
+    "docId": 11,
+    "filename": "AI技术应用培训.pdf",
+    "title": "AI技术应用培训",
+    "content": "人工智能技术应用培训\n\n模块一：AI基础概念\n1. 机器学习基本原理\n   - 监督学习、无监督学习、强化学习\n   - 常见算法：线性回归、决策树、神经网络\n\n2. 深度学习入门\n   - 神经网络结构\n   - 反向传播算法\n   - 常用框架：TensorFlow、PyTorch\n\n模块二：大语言模型\n1. Transformer架构\n   - 注意力机制\n   - 编码器-解码器结构\n\n2. 预训练模型应用\n   - GPT系列模型\n   - BERT模型应用\n   - 模型微调技术\n\n模块三：AI在办公场景的应用\n1. 文档智能处理\n   - 自动摘要生成\n   - 文档分类与标签\n   - 相似文档检索\n\n2. 智能客服系统\n   - 意图识别\n   - 对话管理\n   - 知识库问答\n\n3. 会议智能化\n   - 语音识别转文字\n   - 会议纪要自动生成\n   - 关键信息提取\n\n模块四：实践项目\n1. 构建简单的聊天机器人\n2. 文档智能分析系统\n3. 个性化推荐系统\n\n培训目标：\n掌握AI技术基本概念，能够在实际工作中应用AI技术提高效率。",
+    "type": "pdf",
+    "knowledge_base": "training",
+    "upload_time": "2024-04-01 14:20:00"
+  },
+  {
+    "id": 12,
+    "docId": 12,
+    "filename": "API接口设计规范.md",
+    "title": "API接口设计规范",
+    "content": "# RESTful API 设计规范\n\n## 1. URL 设计原则\n- 使用名词，避免动词\n- 使用复数形式\n- 使用小写字母，单词间用连字符分隔\n\n```\n# 正确示例\nGET /api/users\nGET /api/users/123\nPOST /api/users\nPUT /api/users/123\nDELETE /api/users/123\n\n# 错误示例\nGET /api/getUsers\nPOST /api/createUser\n```\n\n## 2. HTTP 状态码使用\n- 200: 请求成功\n- 201: 创建成功\n- 400: 请求参数错误\n- 401: 未授权\n- 403: 禁止访问\n- 404: 资源不存在\n- 500: 服务器内部错误\n\n## 3. 请求和响应格式\n\n### 请求格式\n```json\n{\n  \"name\": \"张三\",\n  \"email\": \"zhangsan@example.com\",\n  \"department\": \"技术部\"\n}\n```\n\n### 响应格式\n```json\n{\n  \"code\": 200,\n  \"message\": \"success\",\n  \"data\": {\n    \"id\": 1,\n    \"name\": \"张三\",\n    \"email\": \"zhangsan@example.com\"\n  }\n}\n```\n\n## 4. 错误处理\n```json\n{\n  \"code\": 400,\n  \"message\": \"validation failed\",\n  \"errors\": [\n    {\n      \"field\": \"email\",\n      \"message\": \"邮箱格式不正确\"\n    }\n  ]\n}\n```\n\n## 5. 分页设计\n```\nGET /api/users?page=1&size=10&sort=created_at&order=desc\n```\n\n响应：\n```json\n{\n  \"code\": 200,\n  \"data\": {\n    \"items\": [...],\n    \"total\": 100,\n    \"page\": 1,\n    \"size\": 10,\n    \"pages\": 10\n  }\n}\n```",
+    "type": "md",
+    "knowledge_base": "tech",
+    "upload_time": "2024-02-25 16:30:00"
+  }
+]

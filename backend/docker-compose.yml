@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # 智能办公系统主服务
+  smartoffice:
+    build: .
+    container_name: smartoffice-app
+    restart: unless-stopped
+    ports:
+      - "3006:3006"
+      - "3007:3007"
+    volumes:
+      - ./backend/uploads:/app/backend/uploads
+      - ./backend/users.db:/app/backend/users.db
+      - ./backend/meetings.db:/app/backend/meetings.db
+      - ./logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - PYTHONPATH=/app/backend
+    networks:
+      - smartoffice-network
+
+  # Nginx反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: smartoffice-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./ssl:/etc/nginx/ssl
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - smartoffice
+    networks:
+      - smartoffice-network
+
+  # Redis缓存服务
+  redis:
+    image: redis:7-alpine
+    container_name: smartoffice-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - smartoffice-network
+
+  # 数据库备份服务
+  backup:
+    image: alpine:latest
+    container_name: smartoffice-backup
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app/backend
+      - ./backups:/app/backups
+    command: >
+      sh -c "
+        while true; do
+          echo '$(date): 开始备份数据库...'
+          cp /app/backend/users.db /app/backups/users-$(date +%Y%m%d_%H%M%S).db
+          cp /app/backend/meetings.db /app/backups/meetings-$(date +%Y%m%d_%H%M%S).db
+          echo '$(date): 备份完成'
+          # 删除7天前的备份
+          find /app/backups -name '*.db' -mtime +7 -delete
+          sleep 86400
+        done
+      "
+    networks:
+      - smartoffice-network
+
+networks:
+  smartoffice-network:
+    driver: bridge
+
+volumes:
+  redis-data: 
