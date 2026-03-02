@@ -64,6 +64,10 @@ uploads/*
 uploads_frontend/*
 !uploads_frontend/.gitkeep
 
+# Backend upload data
+backend/uploads/
+backend/uploads_frontend/
+
 # Python
 __pycache__/
 *.py[cod]
