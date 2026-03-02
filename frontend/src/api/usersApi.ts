@@ -1,12 +1,15 @@
+// 用户相关API接口 - 提供用户登录、信息获取、更新等功能
 import request from '@/utils/http'
 import { BaseResult } from '@/types/axios'
 
+// 登录参数接口
 interface LoginParams {
   username: string
   password: string
   department: string
 }
 
+// 用户服务类
 export class UserService {
   // 登录
   static login(params: LoginParams) {

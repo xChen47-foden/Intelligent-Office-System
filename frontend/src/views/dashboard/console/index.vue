@@ -45,7 +45,7 @@
             <div class="progress-text">{{ completedTasksCount }}/{{ todayTasks.length }} 已完成</div>
           </div>
           
-          <div class="task-list">
+          <div class="task-list" :class="{ 'no-scroll': todayTasks.length === 0 }">
             <div v-if="todayTasks.length === 0" class="empty-state">
               <el-empty description="暂无任务">
                 <el-button type="primary" @click="showAddTaskDialog">添加第一个任务</el-button>
@@ -92,7 +92,8 @@
               <span>📅 今日会议</span>
             </div>
           </template>
-          <div class="schedule-list">
+          <div class="schedule-content">
+            <div class="schedule-list" :class="{ 'no-scroll': todaySchedule.length === 0 }">
             <div v-if="todaySchedule.length === 0" class="empty-schedule">
               <el-empty description="今日暂无会议" :image-size="80" />
             </div>
@@ -105,6 +106,20 @@
                 <div class="schedule-time">{{ item.time }}</div>
                 <div class="schedule-title">{{ item.title }}</div>
               </div>
+              </div>
+            </div>
+            <div class="schedule-footer">
+              <el-button 
+                size="small" 
+                @click="() => loadTodaySchedule(true)" 
+                type="info" 
+                class="refresh-btn"
+                :loading="scheduleLoading"
+                :disabled="scheduleLoading"
+              >
+                <el-icon v-if="!scheduleLoading"><Refresh /></el-icon>
+                {{ scheduleLoading ? '刷新中...' : '刷新' }}
+              </el-button>
             </div>
           </div>
         </el-card>
@@ -118,12 +133,6 @@
           <template #header>
             <div class="card-header">
               <span>🏢 {{ departmentInfo.name }}</span>
-              <div class="header-actions">
-                <el-button size="small" @click="loadDepartmentInfo" type="info">
-                  <el-icon><Refresh /></el-icon>
-                  刷新
-                </el-button>
-              </div>
             </div>
           </template>
           <div class="department-content">
@@ -237,6 +246,7 @@ const departmentInfo = ref<DepartmentInfo>({
 })
 const todayTasks = ref<Task[]>([])
 const todaySchedule = ref<ScheduleItem[]>([])
+const scheduleLoading = ref(false)
 
 // 任务对话框
 const taskDialogVisible = ref(false)
@@ -308,7 +318,11 @@ const loadDepartmentInfo = async () => {
 const loadTodayTasks = async () => {
   try {
     const tasks = await taskService.getTodayTasks()
-    todayTasks.value = tasks
+    // 确保 completed 状态与任务类型同步
+    todayTasks.value = tasks.map(task => ({
+      ...task,
+      completed: task.completed || task.type === 'bg-success'
+    }))
   } catch (error) {
     console.error('获取今日任务失败:', error)
     // 提供默认任务数据
@@ -342,10 +356,14 @@ const loadTodayTasks = async () => {
 }
 
 // 获取今日会议
-const loadTodaySchedule = async () => {
+const loadTodaySchedule = async (showMessage: boolean = false) => {
   try {
+    scheduleLoading.value = true
+    console.log('[loadTodaySchedule] 开始刷新今日会议...')
+    
     // 从任务服务获取今日会议数据
     const todayMeetings = await taskService.getTodayMeetings()
+    console.log('[loadTodaySchedule] 获取到的今日会议:', todayMeetings)
     
     // 转换为今日会议格式
     todaySchedule.value = todayMeetings.map((meeting: any) => {
@@ -366,7 +384,7 @@ const loadTodaySchedule = async () => {
             displayTime = dayjs(meeting.time).format('HH:mm')
           }
         } catch (error) {
-          console.error('解析会议时间失败:', error, meeting.time)
+          console.error('[loadTodaySchedule] 解析会议时间失败:', error, meeting.time)
           displayTime = '待定'
         }
       }
@@ -377,10 +395,29 @@ const loadTodaySchedule = async () => {
         time: displayTime
       }
     })
-  } catch (error) {
-    console.error('获取今日会议失败:', error)
+    
+    console.log('[loadTodaySchedule] 刷新后的今日会议列表:', todaySchedule.value)
+    
+    // 只在手动刷新时显示消息
+    if (showMessage) {
+      const count = todaySchedule.value.length
+      if (count > 0) {
+        ElMessage.success(`已刷新，共 ${count} 个会议`)
+      } else {
+        ElMessage.info('已刷新，今日暂无会议')
+      }
+    }
+  } catch (error: any) {
+    console.error('[loadTodaySchedule] 获取今日会议失败:', error)
+    // 只在手动刷新时显示错误消息
+    if (showMessage) {
+      const errorMsg = error?.response?.data?.msg || error?.message || '未知错误'
+      ElMessage.error(`刷新失败: ${errorMsg}`)
+    }
     // 提供默认会议数据
     todaySchedule.value = []
+  } finally {
+    scheduleLoading.value = false
   }
 }
 
@@ -418,7 +455,7 @@ const saveTask = async () => {
       content: taskForm.value.content,
       time: taskForm.value.time || new Date().toTimeString().slice(0, 5),
       type: taskForm.value.type,
-      completed: false,
+      completed: taskForm.value.type === 'bg-success',
       date: new Date().toISOString().split('T')[0]
     }
 
@@ -454,6 +491,12 @@ const updateTaskStatus = async (task: Task) => {
   try {
     const success = await taskService.updateTaskStatus(task.id, task.completed)
     if (success) {
+      // 同步本地任务类型，保持“已完成”标签与状态一致
+      if (task.completed) {
+        task.type = 'bg-success'
+      } else if (task.type === 'bg-success') {
+        task.type = 'bg-primary'
+      }
       ElMessage.success(task.completed ? '任务已完成' : '任务已重新激活')
     } else {
       ElMessage.error('更新任务状态失败')
@@ -640,6 +683,14 @@ document.addEventListener('visibilitychange', () => {
   overflow-y: auto;
   padding-right: 5px;
   max-height: 350px; // 为统计信息留出空间
+  
+  // 没有任务时隐藏滚动条
+  &.no-scroll {
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
 }
 
 .task-item {
@@ -862,11 +913,41 @@ document.addEventListener('visibilitychange', () => {
   border: 1px solid var(--art-border-color);
 }
 
+// 会议内容容器
+.schedule-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
 // 会议列表样式
 .schedule-list {
   flex: 1;
   overflow-y: auto;
   padding-right: 5px;
+  min-height: 0; // 允许flex收缩
+  
+  // 没有会议时隐藏滚动条
+  &.no-scroll {
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+// 会议底部刷新按钮
+.schedule-footer {
+  padding: 10px 0;
+  border-top: 1px solid var(--art-border-color);
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+  flex-shrink: 0;
+  
+  .refresh-btn {
+    margin-right: 0;
+  }
 }
 
 .schedule-item {
@@ -942,7 +1023,13 @@ document.addEventListener('visibilitychange', () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  width: 100%;
   height: 100%;
+  min-height: 200px;
+}
+
+.empty-schedule {
+  min-height: 300px;
 }
 
 // 滚动条样式

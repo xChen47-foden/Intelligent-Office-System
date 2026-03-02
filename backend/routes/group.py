@@ -80,6 +80,8 @@ async def send_group_message(data: dict = Body(...), payload: dict = Depends(ver
     group_id = data.get("group_id")
     content = data.get("content")
     msg_type = data.get("type", "text")  # 支持消息类型
+    file_name = data.get("file_name")  # 文件名
+    file_size = data.get("file_size")  # 文件大小
     user_id = payload["userId"]
     # 查找用户信息
     async with SessionLocal() as session:
@@ -95,6 +97,12 @@ async def send_group_message(data: dict = Body(...), payload: dict = Depends(ver
         "avatar": avatar,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
+    # 如果是文件类型，添加文件元数据
+    if msg_type == "file":
+        if file_name:
+            msg_obj["file_name"] = file_name
+        if file_size is not None:
+            msg_obj["file_size"] = file_size
     save_group_message(group_id, msg_obj)
     return {"code": 0, "msg": "发送成功"} 
 

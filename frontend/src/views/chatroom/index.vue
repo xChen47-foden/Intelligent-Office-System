@@ -3,6 +3,10 @@
     <aside class="chat-sidebar">
       <div class="sidebar-header">
         联系人
+        <div class="current-user-info" style="margin-top: 8px; padding: 8px; background: var(--el-fill-color-lighter); border-radius: 4px; font-size: 12px; color: var(--el-text-color-secondary);">
+          <div>当前用户: <strong>{{ userStore.info?.userName || userStore.info?.realName || '未登录' }}</strong></div>
+          <div>用户ID: <strong>{{ myUserId || '未获取' }}</strong></div>
+        </div>
         <div class="chat-action-btns" style="margin-top: 10px;">
           <el-button type="primary" size="small" @click.stop="showAdd = true">添加</el-button>
           <el-button type="success" size="small" @click="showCreateGroup = true" style="margin-left: 10px;">创建群聊</el-button>
@@ -137,6 +141,16 @@
               <span v-if="msg.type === 'image'">
                 <img :src="getImageUrl(msg.content)" class="chat-image" @click="previewImage(msg.content)" />
               </span>
+              <span v-else-if="msg.type === 'file'">
+                <div class="chat-file">
+                  <el-icon class="file-icon"><Document /></el-icon>
+                  <div class="file-info">
+                    <div class="file-name">{{ msg.file_name || '文件' }}</div>
+                    <div class="file-size">{{ formatFileSize(msg.file_size) }}</div>
+                  </div>
+                  <el-button size="small" type="primary" @click.stop="downloadFile(msg.content, msg.file_name)">下载</el-button>
+                </div>
+              </span>
               <span v-else>{{ msg.content }}</span>
             </div>
             <div class="msg-time">{{ formatTime(msg.time) }}</div>
@@ -153,6 +167,16 @@
             <div class="msg-text">
               <span v-if="msg.type === 'image'">
                 <img :src="getImageUrl(msg.content)" class="chat-image" @click="previewImage(msg.content)" />
+              </span>
+              <span v-else-if="msg.type === 'file'">
+                <div class="chat-file">
+                  <el-icon class="file-icon"><Document /></el-icon>
+                  <div class="file-info">
+                    <div class="file-name">{{ msg.file_name || '文件' }}</div>
+                    <div class="file-size">{{ formatFileSize(msg.file_size) }}</div>
+                  </div>
+                  <el-button size="small" type="primary" @click.stop="downloadFile(msg.content, msg.file_name)">下载</el-button>
+                </div>
               </span>
               <span v-else>{{ msg.content }}</span>
             </div>
@@ -171,7 +195,11 @@
           <el-button size="small" @click="selectImage">
             <el-icon><Picture /></el-icon>
           </el-button>
+          <el-button size="small" @click="selectFile">
+            <el-icon><Document /></el-icon>
+          </el-button>
           <input ref="imageInput" type="file" accept="image/*" @change="handleImageSelect" style="display: none" />
+          <input ref="fileInput" type="file" @change="handleFileSelect" style="display: none" />
           <!-- 表情包选择器 -->
           <div v-if="showEmojiPicker" class="emoji-picker">
             <div class="emoji-grid">
@@ -199,7 +227,7 @@
 <script setup lang="ts">
 import { ref, reactive, nextTick, onMounted, onUnmounted, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Avatar, Picture, ChatDotSquare } from '@element-plus/icons-vue'
+import { Avatar, Picture, ChatDotSquare, Document } from '@element-plus/icons-vue'
 import api from '@/utils/http'
 import { useUserStore } from '@/store/modules/user'
 
@@ -311,6 +339,7 @@ const loadUnreadCounts = async () => {
 // 表情包和图片相关
 const showEmojiPicker = ref(false)
 const imageInput = ref<HTMLInputElement | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 const emojiList = [
   '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '🫠', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😗', '😚', '😙', '🥲', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🫢', '🫣', '🤫', '🤔', '🫡', '🤐', '🤨', '😐', '😑', '😶', '😶‍🌫️', '😏', '😒', '🙄', '😬', '😮‍💨', '🤥', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '😵‍💫', '🤯', '🤠', '🥳', '🥸', '😎', '🤓', '🧐', '😕', '😟', '🙁', '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾', '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '👍', '👎', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👏', '🙌', '🤲', '🤝', '🙏', '💪', '💋', '👀', '👄', '🫦', '👅', '💃', '🕺', '🎉', '🎊', '🎈', '🎁', '🎂', '🍰', '🧁', '🍭', '🍬', '🍫', '🍪', '🍩', '🍯', '🍺', '🍻', '🥂', '🍷', '🥃', '🍸', '🍹', '🍾', '🥤', '☕', '🍵', '🥛', '🍼', '🥨', '🍕', '🍔', '🍟', '🌭', '🥪', '🌮', '🌯', '🥙', '🧆', '🥚', '🍳', '🥘', '🍲', '🥗', '🍿', '🧈', '🧀', '🥨', '🥖', '🍞', '🥐', '🥯', '🧇', '🥞', '🍎', '🍊', '🍋', '🍌', '🍉', '🍇', '🍓', '🫐', '🍈', '🍒', '🍑', '🥭', '🍍', '🥥', '🥝', '🍅', '🍆', '🥑', '🥦', '🥬', '🥒', '🌶️', '🫑', '🌽', '🥕', '🫒', '🧄', '🧅', '🥔', '🍠', '🫘', '🥜', '🌰', '🥇', '🥈', '🥉', '🏆', '🏅', '🎖️', '🏵️', '🎗️', '🎫', '🎟️', '🎪', '🎭', '🎨', '🎬', '🎤', '🎧', '🎼', '🎵', '🎶', '🎹', '🥁', '🎷', '🎺', '🎸', '🪕', '🎻', '🎲', '♠️', '♥️', '♦️', '♣️', '♟️', '🃏', '🀄', '🎴', '🎯', '🎳', '🎮', '🎰', '🧩'
 ]
@@ -349,7 +378,34 @@ function getToken() {
 function connectWebSocket() {
   const token = getToken()
   if (!token) return
-  const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://localhost:3007/ws/chat/user?token=${token}`
+  
+  // 动态获取WebSocket URL，使用当前页面的host和port
+  const getWebSocketURL = () => {
+    // 如果配置了环境变量，使用环境变量
+    if (import.meta.env.VITE_WS_URL) {
+      return `${import.meta.env.VITE_WS_URL}/ws/chat/user?token=${token}`
+    }
+    // 开发环境：使用当前页面的host和port
+    if (import.meta.env.DEV) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const host = window.location.host
+      return `${protocol}//${host}/ws/chat/user?token=${token}`
+    }
+    // 生产环境：使用配置的API地址或当前host
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const apiUrl = import.meta.env.VITE_API_URL || window.location.origin
+    // 如果VITE_API_URL是完整URL，提取host部分
+    if (apiUrl.startsWith('http://') || apiUrl.startsWith('https://')) {
+      const url = new URL(apiUrl)
+      return `${protocol}//${url.host}/ws/chat/user?token=${token}`
+    }
+    // 否则使用当前host
+    const host = window.location.host
+    return `${protocol}//${host}/ws/chat/user?token=${token}`
+  }
+  
+  const wsUrl = getWebSocketURL()
+  console.log('WebSocket连接URL:', wsUrl)
   ws = new WebSocket(wsUrl)
   ws.onopen = () => {
     wsConnected.value = true
@@ -582,7 +638,16 @@ function loadMyInfo() {
       }
       
       updateAvatarTimestamp()
+      
+      // 调试信息：显示当前登录用户
+      console.log('当前登录用户ID:', myUserId.value)
+      console.log('当前登录用户名:', res.data.userName || res.data.realName)
+      console.log('Token:', getToken() ? '已设置' : '未设置')
+    } else {
+      console.error('获取用户信息失败:', res)
     }
+  }).catch((error) => {
+    console.error('获取用户信息异常:', error)
   })
 }
 
@@ -758,6 +823,11 @@ function selectImage() {
   imageInput.value?.click()
 }
 
+// 选择文件
+function selectFile() {
+  fileInput.value?.click()
+}
+
 // 处理图片选择
 function handleImageSelect(event: Event) {
   const target = event.target as HTMLInputElement
@@ -858,13 +928,190 @@ function insertEmoji(emoji: string) {
 function getImageUrl(imagePath: string) {
   if (!imagePath) return ''
   if (imagePath.startsWith('http')) return imagePath
-  return `http://localhost:3007${imagePath}`
+  // 动态获取API基础URL
+  const getApiBaseURL = () => {
+    if (import.meta.env.VITE_API_URL) {
+      const apiUrl = import.meta.env.VITE_API_URL
+      // 如果是完整URL，直接使用
+      if (apiUrl.startsWith('http://') || apiUrl.startsWith('https://')) {
+        return apiUrl
+      }
+      return apiUrl
+    }
+    return import.meta.env.DEV ? '' : window.location.origin
+  }
+  return `${getApiBaseURL()}${imagePath}`
 }
 
 // 图片预览
 function previewImage(imagePath: string) {
   const imageUrl = getImageUrl(imagePath)
   window.open(imageUrl, '_blank')
+}
+
+// 处理文件选择
+function handleFileSelect(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  
+  // 验证文件大小（限制50MB）
+  if (file.size > 50 * 1024 * 1024) {
+    ElMessage.error('文件大小不能超过50MB')
+    return
+  }
+  
+  // 上传文件
+  uploadFile(file)
+  
+  // 清空input，允许重复选择同一文件
+  target.value = ''
+}
+
+// 上传文件
+async function uploadFile(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  try {
+    const res = await api.post<{ code: number; data: { url: string; original_name: string; size: number } }>({
+      url: '/api/assistant/upload',
+      data: formData,
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    
+    if (res.code === 0) {
+      // 发送文件消息
+      sendFileMessage(res.data.url, res.data.original_name, res.data.size)
+    } else {
+      ElMessage.error('文件上传失败')
+    }
+  } catch (error) {
+    console.error('文件上传失败:', error)
+    ElMessage.error('文件上传失败')
+  }
+}
+
+// 发送文件消息
+function sendFileMessage(fileUrl: string, fileName: string, fileSize: number) {
+  if (currentGroup.value) {
+    api.post<{ code: number; msg?: string }>({
+      url: '/api/group/send_message',
+      data: { 
+        group_id: currentGroup.value.id, 
+        content: fileUrl, 
+        type: 'file',
+        file_name: fileName,
+        file_size: fileSize
+      }
+    }).then((res) => {
+      if (res.code === 0) {
+        loadGroupMessages()
+      }
+    })
+    return
+  }
+  
+  if (!currentPerson.value) return
+  
+  const msgObj = {
+    from_user_id: myUserId.value,
+    to_user_id: currentPerson.value.id,
+    content: fileUrl,
+    type: 'file',
+    file_name: fileName,
+    file_size: fileSize,
+    time: new Date().toISOString()
+  }
+  
+  if (ws && wsConnected.value) {
+    ws.send(JSON.stringify(msgObj))
+    
+    // 立即添加到本地消息列表
+    messages.value.push({
+      id: Date.now(),
+      from_user_id: myUserId.value,
+      to_user_id: currentPerson.value.id,
+      content: fileUrl,
+      type: 'file',
+      file_name: fileName,
+      file_size: fileSize,
+      time: new Date().toISOString(),
+      is_read: 1
+    })
+    
+    // 滚动到底部
+    nextTick(() => {
+      if (historyRef.value) {
+        historyRef.value.scrollTop = historyRef.value.scrollHeight
+      }
+    })
+  } else {
+    api.post<{ code: number; msg?: string }>({
+      url: '/api/message/send',
+      data: { 
+        to_user_id: currentPerson.value.id, 
+        content: fileUrl, 
+        type: 'file',
+        file_name: fileName,
+        file_size: fileSize
+      }
+    }).then((res) => {
+      if (res.code === 0) {
+        loadMessages()
+      }
+    })
+  }
+}
+
+// 格式化文件大小
+function formatFileSize(bytes: number): string {
+  if (!bytes || bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+}
+
+// 下载文件
+function downloadFile(fileUrl: string, fileName: string) {
+  const getApiBaseURL = () => {
+    if (import.meta.env.VITE_API_URL) {
+      const apiUrl = import.meta.env.VITE_API_URL
+      if (apiUrl.startsWith('http://') || apiUrl.startsWith('https://')) {
+        return apiUrl
+      }
+      return apiUrl
+    }
+    return import.meta.env.DEV ? '' : window.location.origin
+  }
+  
+  const fullUrl = fileUrl.startsWith('http') ? fileUrl : `${getApiBaseURL()}${fileUrl}`
+  const token = getToken()
+  
+  // 使用fetch下载文件，支持token认证
+  fetch(fullUrl, {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  })
+    .then(response => response.blob())
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName || 'download'
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    })
+    .catch(error => {
+      console.error('下载文件失败:', error)
+      ElMessage.error('下载文件失败')
+    })
 }
 
 watch(showAdd, (val) => {
@@ -1150,6 +1397,42 @@ onUnmounted(() => {
 
 .chat-image:hover {
   transform: scale(1.02);
+}
+
+.chat-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color);
+  min-width: 200px;
+  max-width: 400px;
+}
+
+.file-icon {
+  font-size: 32px;
+  color: var(--el-color-primary);
+  flex-shrink: 0;
+}
+
+.file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--el-text-color-primary);
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+
+.file-size {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 

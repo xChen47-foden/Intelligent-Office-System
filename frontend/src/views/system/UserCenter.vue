@@ -9,13 +9,38 @@
                 <el-avatar
                   :size="80"
                   class="avatar-img"
-                  :src="getAvatarUrl(userInfo.avatar)"
-                  :key="userInfo.avatar + avatarTimestamp"
+                  :src="avatarPreview || getAvatarUrl(userInfo.avatar)"
+                  :key="(avatarPreview || userInfo.avatar) + avatarTimestamp"
                 />
+                <div v-if="isUploading || isGenerating" class="avatar-loading">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                </div>
               </div>
-              <input ref="avatarInput" type="file" accept="image/*" style="display:none" @change="onAvatarChange" />
-              <el-button size="small" @click="triggerAvatarUpload" style="margin-bottom:8px;">上传头像</el-button>
-              <el-button size="small" @click="onRandomAvatar" style="margin-bottom:8px;">随机头像</el-button>
+              <input 
+                ref="avatarInput" 
+                type="file" 
+                accept="image/jpeg,image/jpg,image/png,image/gif,image/webp,image/svg+xml" 
+                style="display:none" 
+                @change="onAvatarChange" 
+              />
+              <el-button 
+                size="small" 
+                @click="triggerAvatarUpload" 
+                :loading="isUploading"
+                :disabled="isGenerating"
+                style="margin-bottom:8px;"
+              >
+                {{ isUploading ? '上传中...' : '上传头像' }}
+              </el-button>
+              <el-button 
+                size="small" 
+                @click="onRandomAvatar" 
+                :loading="isGenerating"
+                :disabled="isUploading"
+                style="margin-bottom:8px;"
+              >
+                {{ isGenerating ? '生成中...' : '随机头像' }}
+              </el-button>
               <div class="user-name">{{ userInfo.userName }}</div>
               <div class="user-role-badge">
                 <span class="role-badge">{{ userInfo.roles && userInfo.roles.length ? userInfo.roles.join(',') : '普通用户' }}</span>
@@ -96,6 +121,7 @@
   <script setup lang="ts">
   import { ref, reactive, onMounted, watch } from 'vue'
   import { ElMessage } from 'element-plus'
+  import { Loading } from '@element-plus/icons-vue'
   import { useUserStore } from '@/store/modules/user'
   import { storeToRefs } from 'pinia'
   import { UserService } from '@/api/usersApi'
@@ -139,6 +165,7 @@
         realName: res.data.realName || '',
         nickName: res.data.nickName || '',
         avatar: res.data.avatar || '',
+        department: res.data.department || '', // 添加部门字段
       }
       userStore.setUserInfo(user)
       form.realName = user.realName
@@ -178,6 +205,7 @@
           realName: userRes.data.realName || '',
           nickName: userRes.data.nickName || '',
           avatar: userRes.data.avatar || '',
+          department: userRes.data.department || '', // 添加部门字段
         }
         userStore.setUserInfo(user)
         form.realName = user.realName
@@ -255,12 +283,43 @@
   }
   
   const avatarInput = ref<HTMLInputElement | null>(null)
+  const isUploading = ref(false)
+  const isGenerating = ref(false)
+  const avatarPreview = ref<string>('')
+  
   const triggerAvatarUpload = () => {
     (avatarInput.value as HTMLInputElement).click()
   }
+  
   const onAvatarChange = async (e: Event) => {
     const file = (e.target as HTMLInputElement).files?.[0]
     if (!file) return
+    
+    // 文件类型验证
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml']
+    if (!allowedTypes.includes(file.type)) {
+      ElMessage.error('不支持的文件类型，请选择 JPG、PNG、GIF、WebP 或 SVG 格式的图片')
+      ;(e.target as HTMLInputElement).value = ''
+      return
+    }
+    
+    // 文件大小验证（5MB）
+    const maxSize = 5 * 1024 * 1024
+    if (file.size > maxSize) {
+      ElMessage.error('图片大小不能超过 5MB，请选择较小的图片')
+      ;(e.target as HTMLInputElement).value = ''
+      return
+    }
+    
+    // 预览图片
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      avatarPreview.value = e.target?.result as string
+    }
+    reader.readAsDataURL(file)
+    
+    isUploading.value = true
+    try {
     const res = await UserService.uploadAvatar(file)
     if (res && res.code == 0 && res.data?.avatar) {
       userInfo.avatar = res.data.avatar
@@ -276,13 +335,26 @@
       })
       updateAvatarTimestamp()  // 更新时间戳
       ElMessage.success('头像上传成功')
+        avatarPreview.value = ''
     } else {
-      ElMessage.error(res?.msg || '头像上传失败')
+        ElMessage.error(res?.msg || '头像上传失败，请重试')
+    }
+    } catch (error: any) {
+      console.error('头像上传错误:', error)
+      ElMessage.error(error?.message || '头像上传失败，请检查网络连接')
+    } finally {
+      isUploading.value = false
+      ;(e.target as HTMLInputElement).value = ''
     }
   }
+  
   const onRandomAvatar = async () => {
+    isGenerating.value = true
+    try {
     const res = await UserService.generateAvatar()
     if (res && res.code == 0 && res.data && res.data.avatar) {
+        // 先预览新头像
+        avatarPreview.value = res.data.avatar
       userInfo.avatar = res.data.avatar
       // 更新全局用户状态
       userStore.setUserInfo({
@@ -296,8 +368,18 @@
       })
       updateAvatarTimestamp()  // 更新时间戳
       ElMessage.success('已切换为随机头像')
+        // 延迟清除预览，让用户看到效果
+        setTimeout(() => {
+          avatarPreview.value = ''
+        }, 1000)
     } else {
-      ElMessage.error(res?.msg || '生成随机头像失败')
+        ElMessage.error(res?.msg || '生成随机头像失败，请重试')
+      }
+    } catch (error: any) {
+      console.error('生成随机头像错误:', error)
+      ElMessage.error(error?.message || '生成随机头像失败，请检查网络连接')
+    } finally {
+      isGenerating.value = false
     }
   }
   </script>
@@ -336,10 +418,31 @@
     height: 96px;
     margin: 0 auto 10px auto;
     box-shadow: 0 2px 12px 0 rgba(129,140,248,0.18);
+    position: relative;
   }
   .avatar-img {
     border: 3px solid #fff;
     box-shadow: 0 2px 8px 0 rgba(129,140,248,0.12);
+    transition: opacity 0.3s ease;
+  }
+  .avatar-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  }
+  .avatar-loading .el-icon {
+    font-size: 20px;
+    color: #6366f1;
   }
   .user-name {
     font-size: 22px;

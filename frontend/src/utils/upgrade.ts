@@ -4,7 +4,7 @@ import { useUserStore } from '@/store/modules/user'
 
 // 系统升级
 export function systemUpgrade() {
-  const version = import.meta.env.VITE_VERSION
+  const version = import.meta.env.VITE_VERSION || upgradeLogList.value[0]?.version || 'v1.0.0'
   // 跳过版本为1.0.0的提示
   if (version === '1.0.0') return
 

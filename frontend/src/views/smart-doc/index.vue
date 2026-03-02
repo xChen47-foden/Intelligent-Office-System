@@ -123,6 +123,7 @@
         <div 
           v-if="previewMode === 'formatted'" 
           class="preview-content formatted-preview"
+          :class="{ 'excel-preview': isExcelFile }"
           v-html="formatPreviewContent(previewContent)"
         ></div>
         
@@ -281,9 +282,9 @@ function handleUploadSuccess(response: any) {
 
 function beforeUpload(file: File) {
   const ext = file.name.split('.').pop()?.toLowerCase()
-  const allowExts = ['txt', 'docx', 'pptx', 'xls', 'xlsx', 'csv']
+  const allowExts = ['txt', 'doc', 'docx', 'pdf', 'pptx', 'xls', 'xlsx', 'csv']
   if (!ext || !allowExts.includes(ext)) {
-    ElMessage.error('仅支持 txt、docx、pptx、xls、xlsx、csv 文件')
+    ElMessage.error('仅支持 txt、doc、docx、pdf、pptx、xls、xlsx、csv 文件')
     return false
   }
   return true
@@ -319,8 +320,48 @@ async function deleteDoc(row: any) {
 }
 
 // 下载文档
-function downloadDoc(row: any) {
-  window.open(`/api/doc/${row.id}/download?token=${token}`)
+async function downloadDoc(row: any) {
+  try {
+    const response = await axios.get(`/api/doc/${row.id}/download`, {
+      headers,
+      responseType: 'blob' // 重要：指定响应类型为blob
+    })
+    
+    // 创建blob URL
+    const blob = new Blob([response.data])
+    const url = window.URL.createObjectURL(blob)
+    
+    // 创建临时链接并触发下载
+    const link = document.createElement('a')
+    link.href = url
+    link.download = row.filename || `document_${row.id}`
+    document.body.appendChild(link)
+    link.click()
+    
+    // 清理
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    
+    ElMessage.success('下载成功')
+  } catch (error: any) {
+    console.error('下载失败:', error)
+    if (error.response?.data) {
+      // 如果是JSON错误响应
+      try {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const text = reader.result as string
+          const errorData = JSON.parse(text)
+          ElMessage.error(errorData.msg || '下载失败')
+        }
+        reader.readAsText(error.response.data)
+      } catch (e) {
+        ElMessage.error('下载失败')
+      }
+    } else {
+      ElMessage.error('下载失败: ' + (error.message || '网络错误'))
+    }
+  }
 }
 
 // 智能摘要
@@ -474,6 +515,13 @@ async function previewDoc(row: any) {
   }
 }
 
+// 检查是否是Excel文件
+const isExcelFile = computed(() => {
+  const filename = editingDocTitle.value || currentPreviewDoc?.filename || ''
+  const fileExt = filename.split('.').pop()?.toLowerCase() || ''
+  return fileExt === 'xlsx' || fileExt === 'xls' || fileExt === 'csv'
+})
+
 // 格式化预览内容
 function formatPreviewContent(content: string) {
   if (!content) return '暂无内容'
@@ -483,12 +531,88 @@ function formatPreviewContent(content: string) {
     return content
   }
   
+  // 如果是Excel文件，将制表符分隔的内容转换为表格
+  if (isExcelFile.value) {
+    return formatExcelContent(content)
+  }
+  
   // 否则将纯文本转换为HTML格式
   return content
     .replace(/\n\n/g, '</p><p>')
     .replace(/\n/g, '<br>')
     .replace(/^/, '<p>')
     .replace(/$/, '</p>')
+}
+
+// 格式化Excel内容为HTML表格
+function formatExcelContent(content: string): string {
+  if (!content) return '<p>暂无内容</p>'
+  
+  // 按工作表分隔
+  const sheets = content.split('---工作表分隔---')
+  let html = ''
+  
+  sheets.forEach((sheetContent, sheetIndex) => {
+    const lines = sheetContent.trim().split('\n')
+    if (lines.length === 0) return
+    
+    // 提取工作表名称
+    let sheetName = ''
+    let dataLines: string[] = []
+    
+    lines.forEach(line => {
+      if (line.startsWith('工作表: ')) {
+        sheetName = line.replace('工作表: ', '').trim()
+      } else if (line.trim()) {
+        dataLines.push(line)
+      }
+    })
+    
+    // 如果没有工作表名称，使用默认名称
+    if (!sheetName) {
+      sheetName = `工作表${sheetIndex + 1}`
+      dataLines = lines.filter(line => line.trim())
+    }
+    
+    if (dataLines.length === 0) return
+    
+    // 添加工作表标题
+    html += `<div class="excel-sheet" style="margin-bottom: 30px;">
+      <h3 style="margin-bottom: 10px; color: #409eff; border-bottom: 2px solid #409eff; padding-bottom: 5px;">📊 ${sheetName}</h3>
+      <div style="overflow-x: auto;">
+        <table class="excel-table" style="width: 100%; border-collapse: collapse; border: 1px solid #ddd; background: white;">
+    `
+    
+    // 解析每一行数据
+    dataLines.forEach((line, rowIndex) => {
+      const cells = line.split('\t').map(cell => cell.trim())
+      
+      html += '<tr>'
+      cells.forEach((cell, cellIndex) => {
+        const tag = rowIndex === 0 ? 'th' : 'td'
+        const style = rowIndex === 0 
+          ? 'background: #f5f7fa; font-weight: bold; color: #303133;'
+          : ''
+        html += `<${tag} style="border: 1px solid #ddd; padding: 8px; text-align: left; ${style}">${escapeHtml(cell || '')}</${tag}>`
+      })
+      html += '</tr>'
+    })
+    
+    html += `
+        </table>
+      </div>
+    </div>
+    `
+  })
+  
+  return html || '<p>无法解析Excel内容</p>'
+}
+
+// HTML转义函数
+function escapeHtml(text: string): string {
+  const div = document.createElement('div')
+  div.textContent = text
+  return div.innerHTML
 }
 
 // 切换全屏预览
@@ -898,6 +1022,55 @@ onMounted(() => {
 /* 格式化预览样式 */
 .formatted-preview {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+}
+
+/* Excel预览样式 */
+.excel-preview {
+  padding: 20px;
+  background: #f5f7fa;
+}
+
+.excel-sheet {
+  margin-bottom: 30px;
+  background: white;
+  padding: 15px;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.excel-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid #ddd;
+  background: white;
+  font-size: 14px;
+}
+
+.excel-table th {
+  background: #f5f7fa;
+  font-weight: bold;
+  color: #303133;
+  border: 1px solid #ddd;
+  padding: 10px 8px;
+  text-align: left;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.excel-table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.excel-table tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.excel-table tr:hover {
+  background: #f0f9ff;
 }
 
 .formatted-preview h1 {

@@ -97,6 +97,45 @@
         "time": "2025-07-06T03:25:24.398Z",
         "id": 1751772324398,
         "is_read": 1
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 4,
+        "content": "下午有给会议需要准备一下",
+        "time": "2025-11-30T14:35:21.222Z",
+        "id": 1764513321222,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 4,
+        "content": "/uploads/images/chat_2_1766470631.png",
+        "type": "image",
+        "time": "2025-12-23T06:17:11.140Z",
+        "id": 1766470631139,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 3,
+        "content": "/uploads/assistant/assistant_2_1767679382.doc",
+        "type": "file",
+        "file_name": "钱星晨--毕业设计（论文）指导记录表(1).doc",
+        "file_size": 120832,
+        "time": "2026-01-06T06:03:02.482Z",
+        "id": 1767679382483,
+        "is_read": 0
+      },
+      {
+        "from_user_id": 2,
+        "to_user_id": 4,
+        "content": "/uploads/assistant/assistant_2_1767679402.doc",
+        "type": "file",
+        "file_name": "人工2304班--2312072431--钱星晨开题报告.doc",
+        "file_size": 271872,
+        "time": "2026-01-06T06:03:22.354Z",
+        "id": 1767679402354,
+        "is_read": 0
       }
     ],
     "user_3": [
@@ -172,6 +211,46 @@
         "content": "请查看这个重要文件",
         "time": "2025-01-06T08:05:00.000Z",
         "id": 1735949100000,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 4,
+        "to_user_id": 2,
+        "content": "21313123131231",
+        "time": "2025-11-24T06:37:29.296Z",
+        "id": 1763966249298,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 4,
+        "to_user_id": 2,
+        "content": "欧克",
+        "time": "2025-12-23T06:09:43.216Z",
+        "id": 1766470183216,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 4,
+        "to_user_id": 2,
+        "content": "123",
+        "time": "2025-12-23T06:09:58.580Z",
+        "id": 1766470198581,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 4,
+        "to_user_id": 2,
+        "content": "hi",
+        "time": "2025-12-23T06:12:47.009Z",
+        "id": 1766470367010,
+        "is_read": 1
+      },
+      {
+        "from_user_id": 4,
+        "to_user_id": 2,
+        "content": "123",
+        "time": "2025-12-23T06:16:25.506Z",
+        "id": 1766470585506,
         "is_read": 1
       }
     ]

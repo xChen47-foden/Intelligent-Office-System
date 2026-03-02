@@ -35,6 +35,9 @@
   background-color: color-mix(in srgb, var(--main-color) 65%, white);
 }
 
+// 导入变量
+@import './variables.scss';
+
 // 处理移动端组件兼容性
 @media screen and (max-width: $device-phone) {
   * {

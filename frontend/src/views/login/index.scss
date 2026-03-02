@@ -31,7 +31,7 @@
     overflow: hidden;
     background: #f3f4fb;
     background-size: cover;
-    transition: background-color 0.3s ease;
+    transition: all 0.3s ease;
 
     .logo {
       position: relative;
@@ -221,7 +221,7 @@
           height: 40px;
         }
 
-        // 深色模式下的输入框样式
+        // 输入框样式
         :deep(.el-input__wrapper) {
           background: var(--art-main-bg-color);
           border: 1px solid var(--art-border-color);
@@ -446,42 +446,297 @@
 }
 
 // 深色模式特定样式
-:root[class*="dark"] {
+html.dark {
   .login, .register {
     .left-wrap {
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      background: linear-gradient(135deg, #0a0e27 0%, #1a1a2e 30%, #16213e 70%, #0f3460 100%);
+      position: relative;
+      
+      // 添加深色模式下的遮罩层，让背景图片更暗
+      &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.3);
+        z-index: 2;
+        pointer-events: none;
+      }
+      
+      .left-bg {
+        opacity: 0.4;
+        filter: brightness(0.6);
+      }
+      
+      .left-img {
+        opacity: 0.8;
+        filter: brightness(0.7);
+      }
       
       .text-wrap {
+        position: relative;
+        z-index: 3;
+        
         h1 {
           color: #ffffff;
+          text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
         
         p {
-          color: #a0a9c0;
+          color: #b8c5d6;
+          text-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
         }
       }
       
-      .logo .title {
+      .logo {
+        position: relative;
+        z-index: 3;
+        
+        .title {
         color: #ffffff;
+          text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+        
+        .icon {
+          filter: brightness(1.2);
+        }
       }
     }
     
     .right-wrap {
-      background: var(--art-main-bg-color);
+      background: #0a0e1a;
+      background-image: linear-gradient(180deg, #0a0e1a 0%, #141b2d 100%);
       
       .login-wrap {
-        background: var(--art-main-bg-color);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        border: 1px solid var(--art-border-color);
+        background: rgba(20, 25, 40, 0.95);
+        backdrop-filter: blur(20px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 
+                    0 0 0 1px rgba(255, 255, 255, 0.08),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        
+        .form {
+          .title {
+            color: rgba(255, 255, 255, 0.95) !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+          }
+          
+          .sub-title {
+            color: rgba(255, 255, 255, 0.75) !important;
+          }
+          
+          .forget-password {
+            color: rgba(255, 255, 255, 0.75);
+            
+            a {
+              color: var(--el-color-primary);
+              
+              &:hover {
+                color: var(--el-color-primary-light-3);
+              }
+            }
+          }
+          
+          .footer {
+            color: rgba(255, 255, 255, 0.75);
+            
+            p {
+              color: rgba(255, 255, 255, 0.75);
+            }
+            
+            a {
+              color: var(--el-color-primary);
+              
+              &:hover {
+                color: var(--el-color-primary-light-3);
+              }
+            }
+          }
+        }
       }
       
       .theme-toggle .btn {
         background: var(--art-main-bg-color);
-        border: 1px solid var(--art-border-color);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        
+        i {
+          color: rgba(255, 255, 255, 0.8);
+        }
         
         &:hover {
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+          background: rgba(255, 255, 255, 0.05);
+          border-color: var(--el-color-primary);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+          
+          i {
+            color: var(--el-color-primary);
+          }
+        }
+      }
+      
+      // 深色模式下的输入框
+      .login-wrap .form {
+        :deep(.el-input__wrapper) {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.15);
+          transition: all 0.3s ease;
+          
+          &:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.25);
+          }
+          
+          &.is-focus {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: var(--el-color-primary);
+            box-shadow: 0 0 0 3px rgba(var(--el-color-primary-rgb), 0.15),
+                        inset 0 1px 2px rgba(0, 0, 0, 0.1);
+          }
+        }
+        
+        :deep(.el-input__inner) {
+          color: rgba(255, 255, 255, 0.95);
+          
+          &::placeholder {
+            color: rgba(255, 255, 255, 0.45);
+          }
+        }
+        
+        :deep(.el-input__suffix) {
+          .el-icon {
+            color: rgba(255, 255, 255, 0.6);
+            
+            &:hover {
+              color: rgba(255, 255, 255, 0.9);
+            }
+          }
+        }
+        
+        :deep(.el-select .el-input__wrapper) {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.15);
+          
+          &:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.25);
+          }
+        }
+        
+        :deep(.el-select__popper) {
+          background: rgba(20, 25, 40, 0.98);
+          backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+          
+          .el-select-dropdown__item {
+            color: rgba(255, 255, 255, 0.9);
+            
+            &:hover {
+              background: rgba(255, 255, 255, 0.12);
+            }
+            
+            &.selected {
+              color: var(--el-color-primary);
+              background: rgba(var(--el-color-primary-rgb), 0.1);
+            }
+          }
+        }
+        
+        :deep(.el-checkbox__label) {
+          color: rgba(255, 255, 255, 0.85);
+        }
+        
+        :deep(.el-checkbox__inner) {
+          background-color: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.25);
+          
+          &:hover {
+            border-color: rgba(255, 255, 255, 0.4);
+          }
+        }
+        
+        :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+          background-color: var(--el-color-primary);
+          border-color: var(--el-color-primary);
+        }
+        
+        .drag-verify {
+          :deep(.drag-verify-content) {
+            border-color: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.03);
+            
+            &.error {
+              border-color: #f56c6c;
+              background: rgba(245, 108, 108, 0.1);
+            }
+          }
+          
+          .error-text {
+            color: #f56c6c;
+          }
+          
+          // 拖拽验证组件的深色模式样式
+          :deep(.drag_verify) {
+            background: rgba(255, 255, 255, 0.08) !important;
+            border-color: rgba(255, 255, 255, 0.15) !important;
+            
+            .dv_text {
+              color: rgba(255, 255, 255, 0.75) !important;
+            }
+            
+            .dv_handler {
+              background: rgba(255, 255, 255, 0.2) !important;
+              box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+              
+              i {
+                color: rgba(255, 255, 255, 0.9) !important;
+              }
+            }
+            
+            .dv_progress_bar {
+              background: var(--el-color-primary) !important;
+            }
+          }
+        }
+        
+        // 深色模式下的按钮样式
+        :deep(.el-button--primary) {
+          background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
+          border-color: var(--el-color-primary);
+          box-shadow: 0 4px 12px rgba(var(--el-color-primary-rgb), 0.3);
+          
+          &:hover {
+            background: linear-gradient(135deg, var(--el-color-primary-light-3) 0%, var(--el-color-primary) 100%);
+            border-color: var(--el-color-primary-light-3);
+            box-shadow: 0 6px 16px rgba(var(--el-color-primary-rgb), 0.4);
+            transform: translateY(-1px);
+          }
+          
+          &:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(var(--el-color-primary-rgb), 0.3);
+          }
+        }
+        
+        // 深色模式下的普通按钮
+        :deep(.el-button:not(.el-button--primary)) {
+          background-color: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.2);
+          color: rgba(255, 255, 255, 0.85);
+          
+          &:hover {
+            background-color: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.3);
+            color: rgba(255, 255, 255, 0.95);
+          }
+        }
+        
+        // 表单标签的深色模式样式
+        :deep(.el-form-item__label) {
+          color: rgba(255, 255, 255, 0.85);
         }
       }
     }

@@ -8,8 +8,16 @@ const md = MarkdownIt({
   typographer: true
 }).use(mkKatex)
 
-export function renderMarkdown(text: string) {
+export function renderMarkdown(text: string | null | undefined) {
+  // 处理非字符串类型
+  if (!text) {
+    return ''
+  }
+  
+  // 确保是字符串类型
+  const textStr = String(text)
+  
   // 自动将 $$...$$ 块级公式前后加换行，避免和文字混排
-  const fixed = text.replace(/\$\$(.+?)\$\$/gs, '\n$$$1$$\n')
+  const fixed = textStr.replace(/\$\$(.+?)\$\$/gs, '\n$$$1$$\n')
   return md.render(fixed)
 }

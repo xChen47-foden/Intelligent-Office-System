@@ -220,17 +220,20 @@ import { reactive, toRefs, ref, computed, onMounted, onBeforeUnmount } from 'vue
     overflow: hidden;
     text-align: center;
     border: 1px solid var(--art-border-dashed-color);
+    transition: all 0.3s ease;
 
     .dv_handler {
       position: absolute;
       top: 0;
       left: 0;
       cursor: move;
+      transition: all 0.3s ease;
 
       i {
         padding-left: 0;
         font-size: 14px;
         color: #999;
+        transition: color 0.3s ease;
       }
 
       .el-icon-circle-check {
@@ -243,6 +246,7 @@ import { reactive, toRefs, ref, computed, onMounted, onBeforeUnmount } from 'vue
       position: absolute;
       width: 0;
       height: 34px;
+      transition: all 0.3s ease;
     }
 
     .dv_text {
@@ -262,6 +266,7 @@ import { reactive, toRefs, ref, computed, onMounted, onBeforeUnmount } from 'vue
       animation: slidetounlock 3s infinite;
       -webkit-text-fill-color: transparent;
       text-size-adjust: none;
+      transition: all 0.3s ease;
 
       * {
         -webkit-text-fill-color: var(--textColor);
@@ -277,6 +282,32 @@ import { reactive, toRefs, ref, computed, onMounted, onBeforeUnmount } from 'vue
   .goFirst2 {
     width: 0 !important;
     transition: width 0.5s;
+  }
+</style>
+
+<style lang="scss">
+  // 深色模式下的拖拽验证组件样式
+  html.dark {
+    .drag_verify {
+      border-color: rgba(255, 255, 255, 0.2);
+      
+      .dv_handler {
+        i {
+          color: rgba(255, 255, 255, 0.7) !important;
+        }
+      }
+      
+      .dv_text {
+        background: linear-gradient(
+          to right,
+          var(--textColor) 0%,
+          var(--textColor) 40%,
+          rgba(255, 255, 255, 0.3) 50%,
+          var(--textColor) 60%,
+          var(--textColor) 100%
+        );
+      }
+    }
   }
 </style>
 

@@ -1,13 +1,14 @@
+// 任务和会议服务模块 - 提供任务和会议的CRUD操作
 import api from '@/utils/http'
 
-// 会议数据变更事件
+// 会议数据变更事件常量
 export const MEETING_EVENTS = {
   MEETING_CREATED: 'meeting:created',
   MEETING_UPDATED: 'meeting:updated',
   MEETING_DELETED: 'meeting:deleted'
 }
 
-// 事件发射器
+// 事件发射器类 - 用于组件间通信
 class EventEmitter {
   private events: Record<string, Function[]> = {}
 
@@ -71,6 +72,7 @@ interface MeetingsApiResponse {
   data: Meeting[]
 }
 
+// 任务和会议服务类
 class TaskService {
   private api = api
 
@@ -139,6 +141,11 @@ class TaskService {
         return false
       }
       
+      // 根据完成状态调整任务类型（已完成显示绿色）
+      const nextType = completed
+        ? 'bg-success'
+        : (currentTask.type === 'bg-success' ? 'bg-primary' : currentTask.type)
+      
       // 更新任务状态
       const response = await this.api.put<ApiResponse>({ 
         url: `/api/today-tasks/${id}`, 
@@ -147,7 +154,7 @@ class TaskService {
           time: currentTask.time,
           completed: completed,
           date: currentTask.date,
-          type: currentTask.type,
+          type: nextType,
           endDate: currentTask.endDate || ''
         } 
       })
@@ -186,19 +193,30 @@ class TaskService {
   // 获取今日会议
   async getTodayMeetings(): Promise<Meeting[]> {
     try {
+      console.log('[getTodayMeetings] 开始获取今日会议...')
       // 使用与会议管理页面相同的数据源
       const response = await this.api.get<ApiResponse<{list: Meeting[]}>>({ 
         url: '/api/meetings/list', 
         params: { page: 1, pageSize: 100 } 
       })
+      console.log('[getTodayMeetings] API响应:', response)
+      
       if (response && response.code === 0) {
         const allMeetings = response.data?.list || []
+        console.log('[getTodayMeetings] 所有会议数量:', allMeetings.length)
+        
         // 过滤出今日的会议
         const today = new Date().toISOString().split('T')[0]
-        return allMeetings.filter((meeting: Meeting) => {
-          if (!meeting.time) return false
+        console.log('[getTodayMeetings] 今日日期:', today)
+        
+        const todayMeetings = allMeetings.filter((meeting: Meeting) => {
+          if (!meeting.time) {
+            console.log('[getTodayMeetings] 会议无时间:', meeting)
+            return false
+          }
           // 处理不同的时间格式
           let meetingDate: string
+          try {
           if (typeof meeting.time === 'string') {
             // 如果是ISO格式的完整时间字符串
             if (meeting.time.includes('T') || meeting.time.includes(' ')) {
@@ -211,23 +229,37 @@ class TaskService {
             // 如果是Date对象
             meetingDate = new Date(meeting.time).toISOString().split('T')[0]
           }
-          return meetingDate === today
-        })
+            const isToday = meetingDate === today
+            if (isToday) {
+              console.log('[getTodayMeetings] 找到今日会议:', meeting)
       }
-      return []
+            return isToday
     } catch (error) {
-      console.error('获取今日会议失败:', error)
+            console.error('[getTodayMeetings] 解析会议时间失败:', error, meeting)
+            return false
+          }
+        })
+        
+        console.log('[getTodayMeetings] 今日会议数量:', todayMeetings.length)
+        return todayMeetings
+      } else {
+        console.warn('[getTodayMeetings] API返回错误:', response)
       return []
+      }
+    } catch (error) {
+      console.error('[getTodayMeetings] 获取今日会议失败:', error)
+      throw error // 抛出错误，让调用者知道失败了
     }
   }
 
   // 创建会议
   async createMeeting(meeting: Omit<Meeting, 'id'>): Promise<boolean> {
     try {
-      const response = await this.api.post<ApiResponse>({ url: '/api/meetings/create', data: meeting })
+      const response = await this.api.post<ApiResponse<{meetingId?: number, id?: number}>>({ url: '/api/meetings/create', data: meeting })
       if (response && response.code === 0) {
-        // 通知会议创建事件
-        eventEmitter.emit(MEETING_EVENTS.MEETING_CREATED, meeting)
+        // 通知会议创建事件，包含会议ID
+        const meetingId = response.data?.meetingId || response.data?.id
+        eventEmitter.emit(MEETING_EVENTS.MEETING_CREATED, { ...meeting, id: meetingId })
         return true
       }
       return false

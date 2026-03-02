@@ -2,4 +2,6 @@ fastapi
 uvicorn
 python-docx
 python-pptx
-aiofiles 
+aiofiles
+textract
+PyPDF2 

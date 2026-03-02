@@ -3,7 +3,12 @@
     <div v-if="!isLock">
       <el-dialog v-model="visible" :width="370" :show-close="false" @open="handleDialogOpen">
         <div class="lock-content">
-          <img class="cover" src="@imgs/user/avatar.png" />
+          <img 
+            class="cover" 
+            :src="getAvatarUrl(userInfo?.avatar)" 
+            @error="handleAvatarError"
+            :alt="userInfo.userName || '用户头像'"
+          />
           <div class="username">{{ userInfo.userName }}</div>
           <el-form ref="formRef" :model="formData" :rules="rules" @submit.prevent="handleLock">
             <el-form-item prop="password">
@@ -32,7 +37,12 @@
 
     <div class="unlock-content" v-else>
       <div class="box">
-        <img class="cover" src="@imgs/user/avatar.png" />
+        <img 
+          class="cover" 
+          :src="getAvatarUrl(userInfo?.avatar)" 
+          @error="handleAvatarError"
+          :alt="userInfo.userName || '用户头像'"
+        />
         <div class="username">{{ userInfo.userName }}</div>
         <el-form
           ref="unlockFormRef"
@@ -77,10 +87,33 @@
   import { useI18n } from 'vue-i18n'
   import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
   import { storeToRefs } from 'pinia'
+  import defaultAvatar from '@/assets/img/avatar/avatar5.jpg'
+  import { useSettingStore } from '@/store/modules/setting'
   
   const { t } = useI18n()
   const userStore = useUserStore()
+  const settingStore = useSettingStore()
   const { info: userInfo, lockPassword, isLock } = storeToRefs(userStore)
+  const { isDark } = storeToRefs(settingStore)
+  
+  // 头像URL处理函数
+  const getAvatarUrl = (avatar?: string) => {
+    if (!avatar) return defaultAvatar
+    if (avatar.startsWith('http')) return avatar
+    // 如果已经是/uploads/开头，直接使用，否则添加/uploads/前缀
+    if (avatar.startsWith('/uploads/')) {
+      return `${avatar}?t=${Date.now()}`
+    }
+    return `/uploads/${avatar}?t=${Date.now()}`
+  }
+  
+  // 头像加载失败处理
+  const handleAvatarError = (event: Event) => {
+    const img = event.target as HTMLImageElement
+    if (img.src !== defaultAvatar) {
+      img.src = defaultAvatar
+    }
+  }
 
   const visible = ref(false)
   const formRef = ref<FormInstance>()
@@ -245,6 +278,10 @@
   .layout-lock-screen {
     .el-dialog {
       border-radius: 10px;
+      
+      :deep(.el-dialog__body) {
+        padding: 20px;
+      }
     }
 
     .lock-content {
@@ -256,6 +293,15 @@
         width: 64px;
         height: 64px;
         border-radius: 50%;
+        object-fit: cover;
+        border: 2px solid rgba(0, 0, 0, 0.1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        transition: all 0.3s ease;
+        background-color: #f5f5f5;
+        
+        &:hover {
+          transform: scale(1.05);
+        }
       }
 
       .username {
@@ -263,6 +309,8 @@
         margin-top: 30px;
         font-size: 16px;
         font-weight: 500;
+        color: var(--el-text-color-primary);
+        transition: color 0.3s ease;
       }
 
       .el-form {
@@ -290,7 +338,8 @@
       background-color: #fff;
       background-image: url('@imgs/lock/lock_screen_1.png');
       background-size: cover;
-      transition: transform 0.3s ease-in-out;
+      background-position: center;
+      transition: all 0.3s ease-in-out;
 
       .box {
         display: flex;
@@ -300,12 +349,24 @@
         padding: 30px;
         background: rgb(255 255 255 / 90%);
         border-radius: 10px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        backdrop-filter: blur(10px);
+        transition: all 0.3s ease;
 
         .cover {
           width: 64px;
           height: 64px;
           margin-top: 20px;
           border-radius: 50%;
+          object-fit: cover;
+          border: 2px solid rgba(255, 255, 255, 0.8);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          transition: all 0.3s ease;
+          background-color: #f5f5f5;
+          
+          &:hover {
+            transform: scale(1.05);
+          }
         }
 
         .username {
@@ -313,7 +374,8 @@
           margin-top: 30px;
           font-size: 16px;
           font-weight: 500;
-          color: #333 !important;
+          color: #333;
+          transition: color 0.3s ease;
         }
 
         .el-form {
@@ -323,21 +385,98 @@
 
         .el-input {
           margin-top: 20px;
-          color: #333;
         }
 
         .unlock-btn {
           width: 100%;
+          margin-top: 10px;
         }
 
         .login-btn {
           display: block;
           margin: 10px auto;
-          color: #333 !important;
+          color: #333;
+          transition: color 0.3s ease;
 
           &:hover {
-            color: var(--main-color) !important;
+            color: var(--el-color-primary) !important;
             background-color: transparent !important;
+          }
+        }
+      }
+    }
+  }
+</style>
+
+<style lang="scss">
+  // 深色模式全局样式
+  html.dark {
+    .layout-lock-screen {
+      .el-dialog {
+        background-color: var(--el-bg-color);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        
+        :deep(.el-dialog__header) {
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+      }
+      
+      .lock-content {
+        .username {
+          color: rgba(255, 255, 255, 0.9);
+        }
+        
+        .cover {
+          border: 2px solid rgba(255, 255, 255, 0.2);
+          box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+          background-color: #2a2a3a;
+        }
+      }
+      
+      .unlock-content {
+        background-color: #070707;
+        background-image: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        
+        .box {
+          background: rgba(30, 30, 40, 0.9);
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          
+          .cover {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+            background-color: #2a2a3a;
+          }
+          
+          .username {
+            color: rgba(255, 255, 255, 0.9) !important;
+          }
+          
+          .el-input {
+            :deep(.el-input__wrapper) {
+              background-color: rgba(255, 255, 255, 0.05);
+              border-color: rgba(255, 255, 255, 0.2);
+              
+              &:hover {
+                border-color: rgba(255, 255, 255, 0.3);
+              }
+              
+              &.is-focus {
+                border-color: var(--el-color-primary);
+              }
+            }
+            
+            :deep(.el-input__inner) {
+              color: rgba(255, 255, 255, 0.9);
+            }
+          }
+          
+          .login-btn {
+            color: rgba(255, 255, 255, 0.7) !important;
+            
+            &:hover {
+              color: var(--el-color-primary) !important;
+            }
           }
         }
       }

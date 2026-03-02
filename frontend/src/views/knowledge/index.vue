@@ -10,6 +10,26 @@
           <el-statistic title="总文档数" :value="totalDocs" />
           <el-statistic title="知识库数" :value="knowledgeList.length" />
           <el-statistic title="今日新增" :value="todayAdded" />
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+            <el-button 
+              type="warning" 
+              size="small" 
+              @click="fixDuplicateIds"
+              :loading="fixingIds"
+            >
+              <el-icon><Refresh /></el-icon>
+              修复重复ID
+            </el-button>
+            <el-button 
+              type="success" 
+              size="small" 
+              @click="restoreDeletedDocs"
+              :loading="restoring"
+            >
+              <el-icon><Refresh /></el-icon>
+              恢复被覆盖文档
+            </el-button>
+          </div>
         </div>
       </div>
       
@@ -293,12 +313,45 @@
             </el-table-column>
             <el-table-column prop="type" label="类型" width="120">
               <template #default="{ row }">
-                <el-icon v-if="(row.filename || '').endsWith('.docx')"><Document /></el-icon>
-                <el-icon v-else-if="(row.filename || '').endsWith('.pptx')"><Tickets /></el-icon>
-                <el-icon v-else-if="(row.filename || '').endsWith('.pdf')"><Folder /></el-icon>
-                <el-icon v-else-if="(row.filename || '').endsWith('.txt')"><DocumentCopy /></el-icon>
+                <!-- 从文件名提取扩展名 -->
+                <template v-if="row.filename">
+                  <el-icon v-if="(row.filename || '').toLowerCase().endsWith('.docx') || (row.filename || '').toLowerCase().endsWith('.doc')"><Document /></el-icon>
+                  <el-icon v-else-if="(row.filename || '').toLowerCase().endsWith('.pptx') || (row.filename || '').toLowerCase().endsWith('.ppt')"><Tickets /></el-icon>
+                  <el-icon v-else-if="(row.filename || '').toLowerCase().endsWith('.pdf')"><Folder /></el-icon>
+                  <el-icon v-else-if="(row.filename || '').toLowerCase().endsWith('.txt')"><DocumentCopy /></el-icon>
+                  <el-icon v-else-if="(row.filename || '').toLowerCase().endsWith('.xlsx') || (row.filename || '').toLowerCase().endsWith('.xls')"><Document /></el-icon>
                 <el-icon v-else><Document /></el-icon>
-                <span style="margin-left:4px;">{{ row.type || (row.filename ? row.filename.split('.').pop() : '') }}</span>
+                  <span style="margin-left:4px;">
+                    {{ getFileTypeLabel(row.filename) }}
+                  </span>
+                </template>
+                <!-- 如果没有文件名，使用type字段 -->
+                <template v-else>
+                  <el-icon><Document /></el-icon>
+                  <span style="margin-left:4px;">{{ row.type || '未知' }}</span>
+                </template>
+              </template>
+            </el-table-column>
+            <el-table-column prop="knowledge_base" label="知识库" width="180">
+              <template #default="{ row }">
+                <el-select 
+                  v-model="row.knowledge_base" 
+                  placeholder="选择知识库"
+                  size="small"
+                  clearable
+                  @change="updateDocKnowledgeBase(row)"
+                  style="width: 100%;"
+                >
+                  <el-option 
+                    v-for="item in knowledgeList" 
+                    :key="item.value" 
+                    :label="item.label" 
+                    :value="item.value"
+                  >
+                    <span class="option-icon">{{ item.icon }}</span>
+                    <span>{{ item.label }}</span>
+                  </el-option>
+                </el-select>
               </template>
             </el-table-column>
             <el-table-column prop="content" label="内容" min-width="200">
@@ -313,7 +366,15 @@
                 <div style="display: flex; flex-wrap: nowrap; gap: 4px;">
                   <el-button size="small" @click="previewDoc(scope.row)">预览</el-button>
                   <el-button size="small" @click="() => handleSummary(scope.row)">智能摘要</el-button>
-                  <el-button v-if="canEdit" type="text" size="small" @click="editDoc(scope.row)">编辑</el-button>
+                  <el-button 
+                    v-if="canEdit" 
+                    type="text" 
+                    size="small" 
+                    @click="editDoc(scope.row)"
+                    :disabled="(scope.row.filename || '').toLowerCase().endsWith('.xlsx') || (scope.row.filename || '').toLowerCase().endsWith('.xls') || (scope.row.filename || '').toLowerCase().endsWith('.csv')"
+                  >
+                    编辑
+                  </el-button>
                   <el-button v-if="canDelete" type="text" size="small" style="color: var(--el-color-danger);" @click="confirmDeleteDoc(scope.row)">删除</el-button>
                   <el-button size="small" @click="downloadDoc(scope.row)">下载</el-button>
                 </div>
@@ -373,8 +434,9 @@
             <el-button 
               size="small" 
               :type="previewMode === 'edit' ? 'primary' : ''"
-              @click="previewMode = 'edit'"
+              @click="handleEditMode"
               v-if="canEdit"
+              :disabled="isExcelFile"
             >
               ✏️ 编辑模式
             </el-button>
@@ -402,12 +464,50 @@
           v-if="previewMode === 'edit'" 
           class="preview-content edit-preview"
         >
+          <el-alert
+            v-if="isExcelFile"
+            title="提示"
+            type="warning"
+            :closable="false"
+            style="margin-bottom: 16px;"
+          >
+            <template #default>
+              <div>
+                <p>Excel文件（.xlsx/.xls/.csv）不支持在线编辑。</p>
+                <p>请下载文件后使用Excel软件进行编辑，然后重新上传。</p>
+              </div>
+            </template>
+          </el-alert>
+          
+          <!-- 知识库选择 -->
+          <div style="margin-bottom: 16px;">
+            <el-form-item label="知识库分类">
+              <el-select 
+                v-model="editKnowledgeBase" 
+                placeholder="选择知识库"
+                clearable
+                style="width: 100%;"
+              >
+                <el-option 
+                  v-for="item in knowledgeList" 
+                  :key="item.value" 
+                  :label="item.label" 
+                  :value="item.value"
+                >
+                  <span class="option-icon">{{ item.icon }}</span>
+                  <span>{{ item.label }}</span>
+                </el-option>
+              </el-select>
+            </el-form-item>
+          </div>
+          
           <el-input
             v-model="editContent"
             type="textarea"
             :rows="20"
             placeholder="请输入文档内容..."
             style="width: 100%;"
+            :disabled="isExcelFile"
           />
         </div>
       </div>
@@ -508,6 +608,7 @@ import {
 } from '@element-plus/icons-vue'
 import { fetchKnowledgeList, searchKnowledgeDocs, uploadKnowledgeDoc, fetchDocDetail, editKnowledgeDoc } from '@/api/knowledge'
 import axios from 'axios'
+import api from '@/utils/http'
 
 // 基础数据
 const knowledgeSearch = ref('')
@@ -516,7 +617,8 @@ const knowledgeList = [
   { label: '项目文档', value: 'project', icon: '📁' },
   { label: '合同知识库', value: 'contract', icon: '📄' },
   { label: '技术文档', value: 'tech', icon: '⚙️' },
-  { label: '培训资料', value: 'training', icon: '🎓' }
+  { label: '培训资料', value: 'training', icon: '🎓' },
+  { label: '其他', value: 'other', icon: '📦' }
 ]
 const selectedKnowledge = ref('')
 const selectedType = ref('')
@@ -847,10 +949,23 @@ const loadDocs = async () => {
     if (knowledgeSearch.value.trim()) {
       const res = await searchKnowledgeDocs(knowledgeSearch.value.trim())
       knowledgeDocs.value = Array.isArray(res.data) ? res.data : (res.data.data || [])
+      // 按ID排序（升序）
+      knowledgeDocs.value.sort((a, b) => {
+        const idA = parseInt(a.id || a.docId || 0) || 0
+        const idB = parseInt(b.id || b.docId || 0) || 0
+        return idA - idB
+      })
     } else {
       const res = await fetchKnowledgeList()
       knowledgeDocs.value = Array.isArray(res.data) ? res.data : (res.data.data || [])
     }
+    
+    // 按ID排序（升序）
+    knowledgeDocs.value.sort((a, b) => {
+      const idA = parseInt(a.id || a.docId || 0) || 0
+      const idB = parseInt(b.id || b.docId || 0) || 0
+      return idA - idB
+    })
     
     // 更新总文档数
     totalDocs.value = knowledgeDocs.value.length
@@ -888,10 +1003,39 @@ const filteredDocs = computed(() => {
   // 按文档类型过滤
   if (selectedType.value) {
     filtered = filtered.filter(doc => {
-      const docType = doc.type || (doc.filename ? doc.filename.split('.').pop()?.toLowerCase() : '')
+      // 优先从文件名提取扩展名
+      let docType = ''
+      if (doc.filename) {
+        const ext = doc.filename.split('.').pop()?.toLowerCase() || ''
+        // 统一处理文件类型
+        if (ext === 'docx' || ext === 'doc') {
+          docType = 'docx'
+        } else if (ext === 'pptx' || ext === 'ppt') {
+          docType = 'pptx'
+        } else {
+          docType = ext
+        }
+      } else if (doc.type) {
+        // 如果没有文件名，使用type字段，但也要标准化
+        const typeLower = doc.type.toLowerCase()
+        if (typeLower === 'docx' || typeLower === 'doc' || typeLower === 'word文档' || typeLower === '文档') {
+          docType = 'docx'
+        } else if (typeLower === 'pptx' || typeLower === 'ppt' || typeLower === 'ppt演示') {
+          docType = 'pptx'
+        } else {
+          docType = typeLower
+        }
+      }
       return docType === selectedType.value
     })
   }
+  
+  // 按ID排序（升序）
+  filtered.sort((a, b) => {
+    const idA = parseInt(a.id || a.docId || 0) || 0
+    const idB = parseInt(b.id || b.docId || 0) || 0
+    return idA - idB
+  })
   
   // 更新总文档数
   totalDocuments.value = filtered.length
@@ -918,9 +1062,10 @@ const handleSizeChange = (size: number) => {
 
 // 文档操作
 const docPreviewVisible = ref(false)
-const docPreview = ref({ id: 0, title: '', content: '' })
+const docPreview = ref({ id: 0, title: '', content: '', knowledge_base: '' })
 const editing = ref(false)
 const editContent = ref('')
+const editKnowledgeBase = ref('')
 
 const previewDoc = async (doc: any) => {
   try {
@@ -939,7 +1084,8 @@ const previewDoc = async (doc: any) => {
         docPreview.value = {
           id: res.data.data.docId || res.data.data.id,
           title: res.data.data.title || res.data.data.filename,
-          content: res.data.data.content || ''
+          content: res.data.data.content || '',
+          knowledge_base: res.data.data.knowledge_base || ''
         }
       } else {
         throw new Error('API返回错误')
@@ -950,11 +1096,13 @@ const previewDoc = async (doc: any) => {
       docPreview.value = {
         id: doc.docId || doc.id,
         title: doc.title || doc.filename,
-        content: doc.content || ''
+        content: doc.content || '',
+        knowledge_base: doc.knowledge_base || ''
       }
     }
     
     editContent.value = docPreview.value.content
+    editKnowledgeBase.value = docPreview.value.knowledge_base || ''
     previewMode.value = 'formatted'
     
     ElMessage.success('文档加载成功')
@@ -977,7 +1125,8 @@ const saveEdit = async () => {
     // 调用知识库编辑API
     const res = await axios.post('http://localhost:3007/api/knowledge/edit', {
       id: docPreview.value.id,
-      content: editContent.value
+      content: editContent.value,
+      knowledge_base: editKnowledgeBase.value || ''  // 传递知识库分类
     }, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -988,6 +1137,7 @@ const saveEdit = async () => {
       ElMessage.success('保存成功')
       // 更新预览内容
       docPreview.value.content = editContent.value
+      docPreview.value.knowledge_base = editKnowledgeBase.value || ''
       // 切换回格式化预览模式
       previewMode.value = 'formatted'
       // 刷新文档列表
@@ -1007,6 +1157,10 @@ const handleDocUpload = async (option: any) => {
   try {
     const formData = new FormData()
     formData.append('file', option.file)
+    // 如果选择了知识库，传递知识库参数
+    if (selectedKnowledge.value) {
+      formData.append('knowledge_base', selectedKnowledge.value)
+    }
     await uploadKnowledgeDoc(formData)
     ElMessage.success('上传成功')
     loadDocs()
@@ -1022,15 +1176,47 @@ const handleSelectionChange = (rows: any[]) => {
 }
 
 const batchDelete = async () => {
+  if (selectedDocs.value.length === 0) {
+    ElMessage.warning('请选择要删除的文档')
+    return
+  }
+  
   try {
-    await ElMessageBox.confirm('确定要删除选中的文档吗？', '批量删除', {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedDocs.value.length} 个文档吗？此操作不可恢复。`, 
+      '批量删除', 
+      {
       type: 'warning',
-    })
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消'
+      }
+    )
+    
     // 调用批量删除API
-    ElMessage.success('批量删除成功（模拟）')
+    const ids = selectedDocs.value.map(doc => doc.docId || doc.id).filter(id => id)
+    if (ids.length === 0) {
+      ElMessage.warning('没有有效的文档ID')
+      return
+    }
+    
+    const res = await api.post({
+      url: '/api/knowledge/delete',
+      data: { ids }
+    })
+    
+    if (res.code === 0) {
+      ElMessage.success(`成功删除 ${res.deleted_count || ids.length} 个文档`)
+      selectedDocs.value = []
     loadDocs()
-  } catch (error) {
-    // 用户取消操作
+    } else {
+      ElMessage.error(res.msg || '批量删除失败')
+    }
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      console.error('批量删除失败:', e)
+      const errorMsg = e?.response?.data?.msg || e?.message || '批量删除失败，请重试'
+      ElMessage.error(errorMsg)
+    }
   }
 }
 
@@ -1045,9 +1231,84 @@ const canUpload = computed(() => userPerms.value.includes('upload'))
 const canDelete = computed(() => userPerms.value.includes('delete'))
 
 // 单个文档操作
+// 获取文件类型标签
+const getFileTypeLabel = (filename: string): string => {
+  if (!filename) return '未知'
+  const ext = filename.split('.').pop()?.toLowerCase() || ''
+  
+  // Word文档
+  if (ext === 'docx' || ext === 'doc') {
+    return 'docx'
+  }
+  // PowerPoint文档
+  if (ext === 'pptx' || ext === 'ppt') {
+    return 'pptx'
+  }
+  // PDF文档
+  if (ext === 'pdf') {
+    return 'pdf'
+  }
+  // 文本文件
+  if (ext === 'txt') {
+    return 'txt'
+  }
+  // Excel文件
+  if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
+    return ext
+  }
+  
+  // 其他情况返回扩展名
+  return ext || '未知'
+}
+
+// 获取知识库标签
+const getKnowledgeLabel = (knowledgeBase: string): string => {
+  if (!knowledgeBase) return '未分类'
+  const kb = knowledgeList.find(item => item.value === knowledgeBase)
+  return kb ? kb.label : knowledgeBase
+}
+
+// 更新文档的知识库分类
+const updateDocKnowledgeBase = async (doc: any) => {
+  try {
+    const res = await axios.post('http://localhost:3007/api/knowledge/edit', {
+      id: doc.docId || doc.id,
+      knowledge_base: doc.knowledge_base || ''  // 只更新知识库分类，不更新内容
+    }, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`
+      }
+    })
+    
+    if (res.data.code === 0) {
+      ElMessage.success('知识库分类已更新')
+      // 刷新文档列表
+      loadDocs()
+    } else {
+      throw new Error(res.data.msg || '更新失败')
+    }
+  } catch (error: any) {
+    console.error('更新知识库分类失败:', error)
+    ElMessage.error('更新失败: ' + (error.response?.data?.msg || error.message || '网络错误'))
+    // 恢复原值
+    loadDocs()
+  }
+}
+
 const editDoc = (doc: any) => {
+  // 检查文件类型，xlsx/xls文件不支持编辑
+  const filename = doc.filename || doc.title || ''
+  const fileExt = filename.split('.').pop()?.toLowerCase() || ''
+  
+  if (fileExt === 'xlsx' || fileExt === 'xls' || fileExt === 'csv') {
+    ElMessage.warning('Excel文件（.xlsx/.xls/.csv）不支持在线编辑，请下载后使用Excel软件编辑')
+    return
+  }
+  
   previewDoc(doc)
   editing.value = true
+  // 切换到编辑模式
+  previewMode.value = 'edit'
 }
 
 const deleteDialogVisible = ref(false)
@@ -1057,14 +1318,114 @@ const confirmDeleteDoc = (doc: any) => {
   deleteDialogVisible.value = true
 }
 
-const deleteDoc = async () => {
+// 恢复被覆盖的文档
+const restoring = ref(false)
+const restoreDeletedDocs = async () => {
   try {
-    await axios.delete(`http://localhost:3007/api/knowledge/${docToDelete.docId || docToDelete.id}`)
+    await ElMessageBox.confirm(
+      '此操作将从备份文件或智能文档中恢复被覆盖删除的文档。是否继续？',
+      '恢复被覆盖文档',
+      {
+        type: 'warning',
+        confirmButtonText: '确定恢复',
+        cancelButtonText: '取消'
+      }
+    )
+    
+    restoring.value = true
+    const res = await api.post({
+      url: '/api/knowledge/restore'
+    })
+    
+    if (res.code === 0) {
+      if (res.data?.restored_count > 0) {
+        ElMessage.success(`恢复成功！共恢复 ${res.data.restored_count} 个文档`)
+        // 刷新文档列表
+        loadDocs()
+      } else {
+        ElMessage.info('未发现需要恢复的文档')
+      }
+    } else {
+      ElMessage.error(res.msg || '恢复失败')
+    }
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      console.error('恢复文档失败:', e)
+      const errorMsg = e?.response?.data?.msg || e?.message || '恢复失败，请重试'
+      ElMessage.error(errorMsg)
+    }
+  } finally {
+    restoring.value = false
+  }
+}
+
+// 修复重复ID
+const fixingIds = ref(false)
+const fixDuplicateIds = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '此操作将修复知识库中所有重复的ID，重新分配唯一ID。是否继续？',
+      '修复重复ID',
+      {
+        type: 'warning',
+        confirmButtonText: '确定修复',
+        cancelButtonText: '取消'
+      }
+    )
+    
+    fixingIds.value = true
+    const res = await api.post({
+      url: '/api/knowledge/fix-ids'
+    })
+    
+    if (res.code === 0) {
+      ElMessage.success(`修复成功！共修复 ${res.data?.duplicates_fixed || 0} 个重复ID，总文档数：${res.data?.total || 0}`)
+      // 刷新文档列表
+      loadDocs()
+    } else {
+      ElMessage.error(res.msg || '修复失败')
+    }
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      console.error('修复ID失败:', e)
+      const errorMsg = e?.response?.data?.msg || e?.message || '修复失败，请重试'
+      ElMessage.error(errorMsg)
+    }
+  } finally {
+    fixingIds.value = false
+  }
+}
+
+const deleteDoc = async () => {
+  if (!docToDelete) {
+    ElMessage.error('未选择要删除的文档')
+    return
+  }
+  
+  try {
+    const docId = docToDelete.docId || docToDelete.id
+    if (!docId) {
+      ElMessage.error('文档ID不存在')
+      return
+    }
+    
+    // 使用api工具发送请求（注意：api工具使用del方法，不是delete）
+    const res = await api.del({
+      url: `/api/knowledge/${docId}`
+    })
+    
+    if (res.code === 0) {
     ElMessage.success('删除成功')
     deleteDialogVisible.value = false
+      docToDelete = null
     loadDocs()
-  } catch (e) {
-    ElMessage.error('删除失败')
+    } else {
+      ElMessage.error(res.msg || '删除失败')
+    }
+  } catch (e: any) {
+    console.error('删除失败:', e)
+    const errorMsg = e?.response?.data?.msg || e?.message || '删除失败，请重试'
+    ElMessage.error(errorMsg)
   }
 }
 
@@ -1080,6 +1441,22 @@ function showContent(content: string) {
 const previewLoading = ref(false)
 const previewMode = ref('formatted')
 const saveLoading = ref(false)
+
+// 检查是否是Excel文件
+const isExcelFile = computed(() => {
+  const filename = docPreview.value.title || ''
+  const fileExt = filename.split('.').pop()?.toLowerCase() || ''
+  return fileExt === 'xlsx' || fileExt === 'xls' || fileExt === 'csv'
+})
+
+// 处理编辑模式切换
+const handleEditMode = () => {
+  if (isExcelFile.value) {
+    ElMessage.warning('Excel文件（.xlsx/.xls/.csv）不支持在线编辑，请下载后使用Excel软件编辑')
+    return
+  }
+  previewMode.value = 'edit'
+}
 
 // 智能摘要增强
 const summaryDialogVisible = ref(false)
@@ -1197,7 +1574,58 @@ const exportSummary = () => {
 }
 
 function downloadDoc(row: any) {
-  window.open(`/api/doc/${row.docId || row.id}/download`, '_blank', 'noopener,noreferrer')
+  const docId = row.docId || row.id
+  if (!docId) {
+    ElMessage.error('文档ID不存在')
+    return
+  }
+  
+  // 使用知识库的下载接口
+  const token = localStorage.getItem('token')
+  const url = `/api/knowledge/${docId}/download`
+  
+  // 使用fetch下载，可以添加headers
+  fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  })
+  .then(async res => {
+    // 检查Content-Type，如果是JSON说明是错误响应
+    const contentType = res.headers.get('content-type') || ''
+    if (contentType.includes('application/json')) {
+      const data = await res.json()
+      throw new Error(data.msg || '下载失败')
+    }
+    
+    // 如果是文件响应，获取blob
+    if (res.ok) {
+      return res.blob()
+    } else {
+      const data = await res.json().catch(() => ({ msg: '下载失败' }))
+      throw new Error(data.msg || '下载失败')
+    }
+  })
+  .then(blob => {
+    // 从响应头获取文件名，如果没有则使用默认名称
+    const filename = row.filename || row.title || `文档_${docId}`
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(url)
+    document.body.removeChild(a)
+    ElMessage.success('下载成功')
+  })
+  .catch(error => {
+    console.error('下载失败:', error)
+    // 只有真正的错误才显示错误消息
+    if (error.message && !error.message.includes('下载成功')) {
+      ElMessage.error(error.message || '下载失败')
+    }
+  })
 }
 </script>
 

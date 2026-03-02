@@ -115,10 +115,18 @@
         
         <el-form-item label="优先级">
           <el-radio-group v-model="newTask.type">
-            <el-radio label="bg-primary">普通</el-radio>
-            <el-radio label="bg-success">重要</el-radio>
-            <el-radio label="bg-warning">提醒</el-radio>
-            <el-radio label="bg-danger">紧急</el-radio>
+            <el-radio label="bg-primary">
+              <span class="radio-label">普通</span>
+            </el-radio>
+            <el-radio label="bg-success">
+              <span class="radio-label">重要</span>
+            </el-radio>
+            <el-radio label="bg-warning">
+              <span class="radio-label radio-warning">提醒</span>
+            </el-radio>
+            <el-radio label="bg-danger">
+              <span class="radio-label radio-danger">紧急</span>
+            </el-radio>
           </el-radio-group>
         </el-form-item>
       </el-form>
@@ -568,6 +576,41 @@ onMounted(() => {
       &:hover {
         color: #f0f0f0;
       }
+    }
+  }
+}
+
+// 单选按钮标签颜色
+:deep(.el-radio) {
+  .radio-label {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    transition: all 0.3s;
+    
+    &.radio-warning {
+      background: var(--el-color-warning-light-9);
+      color: var(--el-color-warning);
+      font-weight: 500;
+    }
+    
+    &.radio-danger {
+      background: var(--el-color-error-light-9);
+      color: var(--el-color-error);
+      font-weight: 500;
+    }
+  }
+  
+  // 选中状态时保持颜色
+  &.is-checked {
+    .radio-warning {
+      background: var(--el-color-warning-light-8);
+      color: var(--el-color-warning);
+    }
+    
+    .radio-danger {
+      background: var(--el-color-error-light-8);
+      color: var(--el-color-error);
     }
   }
 }

@@ -62,11 +62,11 @@
                   v-model:value="isPassing"
                   :width="width < 500 ? 328 : 438"
                   :text="$t('login.sliderText')"
-                  textColor="var(--art-gray-800)"
+                  :textColor="isDark ? 'rgba(255, 255, 255, 0.8)' : 'var(--art-gray-800)'"
                   :successText="$t('login.sliderSuccessText')"
                   :progressBarBg="getCssVariable('--el-color-primary')"
-                  background="var(--art-gray-200)"
-                  handlerBg="var(--art-main-bg-color)"
+                  :background="isDark ? 'rgba(255, 255, 255, 0.1)' : 'var(--art-gray-200)'"
+                  :handlerBg="isDark ? 'rgba(255, 255, 255, 0.2)' : 'var(--art-main-bg-color)'"
                   @pass="onPass"
                 />
               </div>
@@ -125,6 +125,7 @@
   import { storeToRefs } from 'pinia'
   import { useSettingStore } from '@/store/modules/setting'
   import { themeAnimation } from '@/utils/theme/animation'
+  import { useWindowSize } from '@vueuse/core'
   import ArtDragVerify from '@/components/core/forms/ArtDragVerify.vue'
   import LoginLeftView from '@/components/core/views/login/LoginLeftView.vue'
 
@@ -137,6 +138,9 @@
 
   const systemName = AppConfig.systemInfo.name
   const formRef = ref<FormInstance>()
+  
+  // 响应式宽度
+  const { width } = useWindowSize()
 
   const formData = reactive({
     username: '',
@@ -230,9 +234,26 @@
           } else {
             ElMessage.error(res.msg || '登录失败')
           }
-        } catch (e) {
+        } catch (e: any) {
           console.error('登录失败:', e)
-          ElMessage.error('网络异常或服务器错误')
+          console.error('错误详情:', {
+            message: e?.message,
+            response: e?.response,
+            status: e?.response?.status,
+            data: e?.response?.data
+          })
+          
+          // 显示更详细的错误信息
+          let errorMsg = '网络异常或服务器错误'
+          if (e?.response?.data?.msg) {
+            errorMsg = e.response.data.msg
+          } else if (e?.response?.data?.detail) {
+            errorMsg = e.response.data.detail
+          } else if (e?.message) {
+            errorMsg = e.message
+          }
+          
+          ElMessage.error(errorMsg)
         } finally {
           loading.value = false
           resetDragVerify()

@@ -5,6 +5,7 @@
 </template>
 
 <script setup lang="ts">
+  // 应用根组件 - 处理应用初始化、用户信息获取、主题切换等
   import { useUserStore } from './store/modules/user'
   import { systemUpgrade } from './utils/upgrade'
   import { initState, saveUserData } from './utils/storage'
@@ -18,10 +19,12 @@
   const route = useRoute()
   userStore.initState()
 
+  // 组件挂载前：设置主题过渡类
   onBeforeMount(() => {
     setThemeTransitionClass(true)
   })
 
+  // 组件挂载后：初始化状态、保存用户数据、系统升级、获取用户信息
   onMounted(() => {
     initState()
     saveUserData()
@@ -33,7 +36,7 @@
     }
   })
 
-  // 获取用户信息
+  // 从服务器获取用户信息
   const getUserInfo = async () => {
     // 检查是否有token
     const token = localStorage.getItem('token')

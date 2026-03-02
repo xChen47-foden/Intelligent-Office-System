@@ -42,6 +42,7 @@ export enum RoutesAlias {
   User = 'system/User', // 账户
   Role = 'system/Role', // 角色
   UserCenter = 'system/UserCenter', // 用户中心
+  Personnel = 'system/Personnel', // 人员管理
   Menu = 'system/Menu', // 菜单
   NestedMenu1 = 'system/nested/Menu1', // 嵌套菜单1
   NestedMenu21 = 'system/nested/menu2/Menu2-1', // 嵌套菜单2-1

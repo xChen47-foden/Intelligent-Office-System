@@ -15,8 +15,25 @@ import { asyncRoutes } from '../routes/asyncRoutes'
 import { loadingService } from '@/utils/loading'
 import { useCommon } from '@/composables/useCommon'
 
+// 是否已注册动态路由（使用 sessionStorage 持久化，避免刷新时丢失）
+const getRouteRegistered = () => {
+  try {
+    return sessionStorage.getItem('routeRegistered') === 'true'
+  } catch {
+    return false
+  }
+}
+
+const setRouteRegistered = (value: boolean) => {
+  try {
+    sessionStorage.setItem('routeRegistered', value ? 'true' : 'false')
+  } catch {
+    // 忽略错误
+  }
+}
+
 // 是否已注册动态路由
-const isRouteRegistered = ref(false)
+const isRouteRegistered = ref(getRouteRegistered())
 
 /**
  * 路由全局前置守卫
@@ -85,19 +102,20 @@ async function handleRouteGuard(
 
   console.log('⚠️ 路由未匹配，matched.length:', to.matched.length)
 
-  // 处理动态路由注册（只有在需要时才注册）
-  if (!isRouteRegistered.value && userStore.isLogin && !isStaticRoute(to.path)) {
+  // 如果用户已登录但路由未匹配，需要注册动态路由
+  if (userStore.isLogin && !isStaticRoute(to.path)) {
+    // 如果路由未注册，或者需要重新注册
+    if (!isRouteRegistered.value) {
     console.log('🔄 开始动态路由注册')
     await handleDynamicRoutes(to, router, next)
     return
-  }
-
-  // 尝试刷新路由重新注册
-  if (userStore.isLogin && !isStaticRoute(to.path)) {
-    console.log('🔄 重新注册动态路由')
+    } else {
+      // 如果已注册但路由仍未匹配，可能是路由注册有问题，重新注册
+      console.log('🔄 路由已注册但未匹配，重新注册动态路由')
     isRouteRegistered.value = false
     await handleDynamicRoutes(to, router, next)
     return
+    }
   }
 
   // 如果以上都不匹配，跳转到404
@@ -130,7 +148,13 @@ async function handleDynamicRoutes(
   next: NavigationGuardNext
 ): Promise<void> {
   try {
+    console.log('🔄 开始注册动态路由，目标路径:', to.path)
     await getMenuData(router)
+    console.log('✅ 动态路由注册完成，准备导航到:', to.fullPath)
+    
+    // 等待路由注册完成
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
     // 重新导航到目标路由，以便重新匹配
     next({ path: to.fullPath, replace: true })
   } catch (error) {
@@ -163,6 +187,7 @@ async function processFrontendMenu(router: Router): Promise<void> {
   const menuList = asyncRoutes.map((route) => menuDataToRouter(route))
   const userStore = useUserStore()
   let roles = userStore.info.roles
+  const department = userStore.info.department || ''
 
   // 如果没有角色信息，设置默认角色
   if (!roles || roles.length === 0) {
@@ -172,9 +197,11 @@ async function processFrontendMenu(router: Router): Promise<void> {
     userStore.setUserInfo({ ...userStore.info, roles } as any)
   }
 
-  console.log('👤 用户角色:', roles)
-  const filteredMenuList = filterMenuByRoles(menuList, roles)
+  console.log('👤 用户角色:', roles, '部门:', department, '部门类型:', typeof department)
+  console.log('📋 原始菜单列表:', menuList)
+  const filteredMenuList = filterMenuByRolesAndDepartment(menuList, roles, department)
   console.log('📋 过滤后的菜单列表:', filteredMenuList)
+  console.log('📋 过滤后的菜单项名称:', filteredMenuList[0]?.children?.map((item: any) => item.name))
   
   await registerAndStoreMenu(router, filteredMenuList, () => {})
 }
@@ -212,6 +239,7 @@ async function registerAndStoreMenu(
   console.log('🛤️ 动态路由注册完成')
   
   isRouteRegistered.value = true
+  setRouteRegistered(true)
   console.log('🎯 路由注册标记已设置为true')
   closeLoading()
 }
@@ -226,19 +254,54 @@ function handleMenuError(error: unknown): void {
 }
 
 /**
- * 根据角色过滤菜单
+ * 根据角色和部门过滤菜单
  */
-const filterMenuByRoles = (menu: MenuListType[], roles: string[]): MenuListType[] => {
+const filterMenuByRolesAndDepartment = (menu: MenuListType[], roles: string[], department: string): MenuListType[] => {
   return menu.reduce((acc: MenuListType[], item) => {
     const itemRoles = item.meta?.roles
-    const hasPermission = !itemRoles || itemRoles.some((role) => Array.isArray(roles) && roles.includes(role))
+    const itemDepartment = item.meta?.department as string | undefined
+    
+    // 检查角色权限
+    const hasRolePermission = !itemRoles || itemRoles.some((role) => Array.isArray(roles) && roles.includes(role))
+    
+    // 检查部门权限（如果菜单项指定了部门要求）
+    let hasDepartmentPermission = true
+    if (itemDepartment) {
+      hasDepartmentPermission = department === itemDepartment
+    }
+    
+    // 特殊处理：人员管理只对人事部显示
+    const isPersonnelMenu = item.name === 'Personnel' || 
+                           item.path?.includes('personnel') || 
+                           item.path?.includes('/personnel') ||
+                           item.meta?.title === '人员管理'
+    
+    if (isPersonnelMenu) {
+      console.log(`[菜单过滤] 检测到人员管理菜单项`)
+      console.log(`[菜单过滤] 菜单项名称: ${item.name}, 路径: ${item.path}`)
+      console.log(`[菜单过滤] 当前用户部门: "${department}" (类型: ${typeof department})`)
+      console.log(`[菜单过滤] 需要部门: "人事部"`)
+      hasDepartmentPermission = department === '人事部'
+      console.log(`[菜单过滤] 人员管理权限检查结果: ${hasDepartmentPermission}`)
+      if (!hasDepartmentPermission) {
+        console.log(`[菜单过滤] 非人事部用户，隐藏人员管理菜单`)
+        return acc // 直接返回，不添加此菜单项
+      }
+    }
+
+    const hasPermission = hasRolePermission && hasDepartmentPermission
 
     if (hasPermission) {
       const filteredItem = { ...item }
       if (filteredItem.children?.length) {
-        filteredItem.children = filterMenuByRoles(filteredItem.children, roles)
+        filteredItem.children = filterMenuByRolesAndDepartment(filteredItem.children, roles, department)
       }
       acc.push(filteredItem)
+    } else {
+      // 如果是人员管理菜单但没有权限，记录日志
+      if (isPersonnelMenu) {
+        console.log(`[菜单过滤] 人员管理菜单被过滤掉`)
+      }
     }
 
     return acc
@@ -265,6 +328,7 @@ function isStaticRoute(path: string): boolean {
  */
 export function resetRouterState(router: Router): void {
   isRouteRegistered.value = false
+  setRouteRegistered(false)
   // 清理动态注册的路由
   router.getRoutes().forEach((route) => {
     if (route.meta?.dynamic) {

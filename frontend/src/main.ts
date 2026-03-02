@@ -1,3 +1,4 @@
+// 前端应用主入口文件 - 初始化Vue应用、路由、状态管理等
 import App from './App.vue'
 import 'default-passive-events'
 import { createApp } from 'vue'
@@ -29,6 +30,7 @@ import i18n from './language'
 import ElementPlus from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
+// 创建Vue应用实例
 const app = createApp(App)
 
 // 配置 Element Plus 中文语言
@@ -36,16 +38,20 @@ app.use(ElementPlus, {
   locale: zhCn,
 })
 
+// 初始化应用：Store、Router、动态路由、全局指令
 initStore(app)
 initRouter(app)
 registerDynamicRoutes(router, asyncRoutes)
 setupGlobDirectives(app)
 
+// 初始化用户状态
 const userStore = useUserStore()
 userStore.initState()
 
+// 注册Element Plus图标组件
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }
+// 使用国际化插件并挂载应用
 app.use(i18n)
 app.mount('#app')

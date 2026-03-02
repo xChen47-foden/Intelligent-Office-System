@@ -57,28 +57,28 @@
 
         <!-- 聊天输入区域 -->
         <div class="chat-input">
-          <el-input
-            v-model="messageText"
-            type="textarea"
-            :rows="3"
-            placeholder="输入消息"
-            resize="none"
-            @keyup.enter.prevent="sendMessage"
-          >
-            <template #append>
+          <div class="input-actions-wrapper">
               <div class="input-actions">
                 <el-upload
                   :show-file-list="false"
                   accept="image/*"
-                  :before-upload="file => { sendImage(file); return false; }"
-                >
-                  <el-button :icon="Picture" circle plain />
+                :auto-upload="false"
+                :on-change="handleImageChange"
+                class="action-upload"
+              >
+                <template #trigger>
+                  <div class="action-btn image-btn">
+                    <el-icon :size="20"><Picture /></el-icon>
+                    <span class="btn-label">图片</span>
+                  </div>
+                </template>
                 </el-upload>
-                <el-button :icon="Paperclip" circle plain />
-                <el-button icon="el-icon-smile" circle plain @click="showEmoji = !showEmoji" class="emoji-button" />
-                <el-button type="primary" @click="sendMessage" v-ripple>发送</el-button>
+              <div class="action-btn emoji-btn" @click="toggleEmojiPicker">
+                <span class="emoji-icon">😀</span>
+                <span class="btn-label">表情</span>
               </div>
-              <div v-if="showEmoji" class="emoji-picker-wrap">
+            </div>
+            <div v-if="showEmoji" class="emoji-picker-wrap" @click.stop>
                 <div class="emoji-picker">
                   <div class="emoji-header">选择表情</div>
                   <div class="emoji-grid">
@@ -93,13 +93,16 @@
                   </div>
                 </div>
               </div>
-            </template>
-          </el-input>
+          </div>
+          <el-input
+            v-model="messageText"
+            type="textarea"
+            :rows="3"
+            placeholder="输入消息"
+            resize="none"
+            @keyup.enter.prevent="sendMessage"
+          />
           <div class="chat-input-actions">
-            <div class="left">
-              <i class="iconfont-sys">&#xe634;</i>
-              <i class="iconfont-sys">&#xe809;</i>
-            </div>
             <el-button type="primary" @click="sendMessage" v-ripple>发送</el-button>
           </div>
         </div>
@@ -110,7 +113,7 @@
 
 <script setup lang="ts">
   import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-  import { Picture, Paperclip, Close, Loading, Warning } from '@element-plus/icons-vue'
+  import { Picture, Close, Loading, Warning } from '@element-plus/icons-vue'
   import mittBus from '@/utils/mittBus'
   import meAvatar from '@/assets/img/avatar/avatar5.jpg'
   import aiAvatar from '@/assets/img/avatar/avatar10.jpg'
@@ -203,16 +206,37 @@
         message: text,
         sessionId: '便捷助手',
       })
-      // 适配AI回复内容结构
-      const reply = res.data?.data?.reply || res.data?.answer || 'AI未返回内容'
+      
+      // 检查响应状态
+      if (res.data?.code === 0) {
+        // 成功响应，提取回复内容
+        const reply = res.data?.data?.reply || res.data?.data?.text || res.data?.answer || res.data?.reply || '抱歉，AI暂时无法回复'
+        messages.value.push({
+          id: messageId.value++, sender: 'Art Bot', content: reply,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isMe: false, avatar: aiAvatar
+        })
+      } else {
+        // API返回错误
+        const errorMsg = res.data?.msg || 'AI服务暂时不可用，请稍后再试'
+        messages.value.push({
+          id: messageId.value++, sender: 'Art Bot', content: `❌ ${errorMsg}`,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isMe: false, avatar: aiAvatar
+        })
+        ElMessage.error(errorMsg)
+      }
+      scrollToBottom()
+    } catch (error: any) {
+      console.error('发送消息失败:', error)
+      const errorMsg = error?.response?.data?.msg || error?.message || '网络错误，请检查网络连接'
       messages.value.push({
-        id: messageId.value++, sender: 'Art Bot', content: reply,
+        id: messageId.value++, sender: 'Art Bot', content: `❌ ${errorMsg}`,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isMe: false, avatar: aiAvatar
       })
+      ElMessage.error('发送消息失败: ' + errorMsg)
       scrollToBottom()
-    } catch (error) {
-      ElMessage.error('发送消息失败')
     }
     ragLoading.value = false
   }
@@ -241,8 +265,27 @@
     }
   })
 
+  // 处理图片选择
+  const handleImageChange = (file: any) => {
+    console.log('图片选择:', file)
+    if (file) {
+      // ElementPlus upload组件的file对象结构
+      const fileObj = file.raw || file
+      if (fileObj instanceof File) {
+        sendImage(fileObj)
+      } else {
+        console.error('无效的文件对象:', file)
+        ElMessage.error('文件选择失败，请重试')
+      }
+    }
+  }
+
   // 发送图片
-  const sendImage = async (file: File) => {
+  const sendImage = async (file: File | null) => {
+    if (!file) {
+      return
+    }
+    
     // 验证文件类型和大小
     if (!file.type.startsWith('image/')) {
       ElMessage.error('请选择图片文件')
@@ -360,6 +403,11 @@
     '🔰', '♻️', '✅', '🈯', '💹', '❇️', '✳️', '❎', '🌐', '💠'
   ]
 
+  // 切换表情包选择器
+  const toggleEmojiPicker = () => {
+    showEmoji.value = !showEmoji.value
+  }
+
   // 选择表情
   const insertEmoji = (emoji: string) => {
     messageText.value += emoji
@@ -369,7 +417,7 @@
   // 点击外部关闭表情选择器
   const handleClickOutside = (event: MouseEvent) => {
     const target = event.target as HTMLElement
-    if (!target.closest('.emoji-picker-wrap') && !target.closest('.emoji-button')) {
+    if (!target.closest('.emoji-picker-wrap') && !target.closest('.emoji-button') && !target.closest('.input-actions')) {
       showEmoji.value = false
     }
   }
@@ -582,29 +630,16 @@
     .chat-input {
       padding: 16px 16px 0;
 
-      .input-actions {
-        display: flex;
-        gap: 8px;
-        padding: 8px 0;
+      .input-actions-wrapper {
+        margin-bottom: 12px;
+        position: relative;
       }
 
       .chat-input-actions {
         display: flex;
-        align-items: center; // 修正为单数
-        justify-content: space-between;
+        align-items: center;
+        justify-content: flex-end;
         margin-top: 12px;
-
-        .left {
-          display: flex;
-          align-items: center;
-
-          i {
-            margin-right: 20px;
-            font-size: 16px;
-            color: var(--art-gray-500);
-            cursor: pointer;
-          }
-        }
 
         // 确保发送按钮与输入框对齐
         el-button {
@@ -634,11 +669,84 @@
     }
   }
 
+  .input-actions-wrapper {
+    position: relative;
+    width: 100%;
+  }
+  
+  .input-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    
+    .action-upload {
+      display: inline-block;
+    }
+    
+    .action-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 20px;
+      background: var(--el-fill-color-lighter);
+      border: 1px solid var(--el-border-color-lighter);
+      cursor: pointer;
+      transition: all 0.3s ease;
+      user-select: none;
+      
+      &:hover {
+        background: var(--el-fill-color);
+        border-color: var(--el-color-primary);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+      
+      &:active {
+        transform: translateY(0);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+      }
+      
+      .el-icon {
+        color: var(--el-color-primary);
+        transition: transform 0.2s;
+      }
+      
+      .emoji-icon {
+        font-size: 18px;
+        line-height: 1;
+      }
+      
+      .btn-label {
+        font-size: 14px;
+        color: var(--el-text-color-primary);
+        font-weight: 500;
+      }
+      
+      &:hover .el-icon {
+        transform: scale(1.1);
+      }
+    }
+    
+    .image-btn {
+      &:hover {
+        background: rgba(64, 158, 255, 0.1);
+      }
+    }
+    
+    .emoji-btn {
+      &:hover {
+        background: rgba(255, 193, 7, 0.1);
+        border-color: rgba(255, 193, 7, 0.3);
+      }
+    }
+  }
+
   .emoji-picker-wrap {
     position: absolute;
-    bottom: 60px;
+    bottom: calc(100% + 8px);
     left: 0;
-    z-index: 1000;
+    z-index: 2000;
     
     .emoji-picker {
       background: var(--el-bg-color);

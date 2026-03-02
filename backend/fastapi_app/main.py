@@ -8,7 +8,7 @@ from email.mime.text import MIMEText
 from email.header import Header
 from email.utils import formataddr
 import re
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Table, func
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Table, func, or_
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.future import select
@@ -25,8 +25,10 @@ import shutil
 import time
 import json
 import uuid
+import base64
 from fastapi.responses import FileResponse, JSONResponse
 import mimetypes
+import html
 import httpx
 import string
 import requests
@@ -35,8 +37,8 @@ from fastapi.staticfiles import StaticFiles
 import threading
 from fastapi import status
 from fastapi.responses import JSONResponse
-from .db import Base, User, SessionLocal, engine, TodayTask
-from .auth_utils import verify_token
+from db import Base, User, SessionLocal, engine, TodayTask
+# from auth_utils import verify_token  # 使用本地定义的 verify_token
 from starlette.websockets import WebSocketDisconnect
 from sqlalchemy import delete as sqlalchemy_delete
 
@@ -52,8 +54,25 @@ app.add_middleware(
     allow_headers=["*"],  # 允许所有头
 )
 
-# Redis配置
-r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+# Redis配置（可选，如果 Redis 不可用则使用内存存储）
+try:
+    r = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    r.ping()  # 测试连接
+    print("Redis 连接成功")
+except Exception as e:
+    print(f"Redis 连接失败，将使用内存存储: {e}")
+    # 使用内存字典作为备用存储
+    class MemoryStore:
+        def __init__(self):
+            self.data = {}
+        def get(self, key):
+            return self.data.get(key)
+        def set(self, key, value, ex=None):
+            self.data[key] = value
+        def delete(self, key):
+            if key in self.data:
+                del self.data[key]
+    r = MemoryStore()
 
 # 数据库配置
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -65,7 +84,8 @@ MeetingSessionLocal = sessionmaker(bind=meeting_engine, class_=AsyncSession, exp
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
 
-# 数据模型
+# ========== 数据模型 ==========
+# 会议数据模型
 class Meeting(Base):
     __tablename__ = "meetings"
     id = Column(Integer, primary_key=True, index=True)
@@ -98,7 +118,8 @@ class RecordingHistory(Base):
 # 通知数据模型
 # 删除通知数据模型
 
-# Pydantic模型
+# ========== Pydantic请求模型 ==========
+# 验证码请求模型
 class CaptchaRequest(BaseModel):
     contact: str
 
@@ -156,7 +177,8 @@ class RecordingUpdateRequest(BaseModel):
 
 # 删除通知相关Pydantic模型
 
-# 邮件发送功能
+# ========== 工具函数 ==========
+# 发送邮件验证码
 def send_email_code(to_email, code):
     email_user = os.getenv("EMAIL_USER", "1642256761@qq.com")
     email_pass = os.getenv("EMAIL_PASS", "izeltputkiwldgba")
@@ -187,7 +209,8 @@ def send_email_code(to_email, code):
     except Exception as e:
         raise Exception(f"发送邮件时发生未知错误: {str(e)}")
 
-# 路由处理
+# ========== 认证相关API ==========
+# 发送验证码接口
 @app.post("/api/send-captcha")
 async def send_captcha(data: CaptchaRequest):
     # 验证邮箱格式
@@ -213,6 +236,7 @@ async def send_captcha(data: CaptchaRequest):
             pass
         return {"code": 500, "msg": str(e)}
 
+# 验证验证码接口
 @app.post("/api/verify-captcha")
 async def verify_captcha(data: CaptchaVerifyRequest):
     real_code = r.get(f"captcha:{data.contact}")
@@ -223,9 +247,11 @@ async def verify_captcha(data: CaptchaVerifyRequest):
     r.delete(f"captcha:{data.contact}")
     return {"code": 0, "msg": "验证成功"}
 
+# 生成随机用户名
 def generate_random_username():
     return "user_" + ''.join(random.choices(string.digits, k=5))
 
+# 生成随机头像URL
 def generate_random_avatar():
     """生成随机头像"""
     # 预设的头像列表（包括SVG和其他格式）
@@ -261,8 +287,8 @@ def generate_random_avatar():
     # 返回DiceBear API URL
     return f"https://api.dicebear.com/7.x/{style}/svg?seed={seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf"
 
+# 从URL下载头像并保存到本地
 def save_avatar_from_url(avatar_url: str, user_id: int) -> str:
-    """从URL下载头像并保存到本地"""
     try:
         import requests
         response = requests.get(avatar_url, timeout=10)
@@ -284,106 +310,202 @@ def save_avatar_from_url(avatar_url: str, user_id: int) -> str:
     # 如果保存失败，返回默认头像路径
     return "avatar/default.svg"
 
+# 用户注册接口
 @app.post("/api/register")
 async def register_user(data: RegisterRequest):
-    print("收到注册请求：", data.username, data.contact, data.department)
-    real_code = r.get(f"captcha:{data.contact}")
-    print("验证码从redis获取：", real_code)
-    if not real_code:
-        print("验证码已过期或不存在")
-        raise HTTPException(400, "验证码已过期或不存在")
-    if data.captcha != real_code:
-        print("验证码错误")
-        raise HTTPException(400, "验证码错误")
-    r.delete(f"captcha:{data.contact}")
+    try:
+        print("收到注册请求：", data.username, data.contact, data.department)
+        
+        # 验证必填字段
+        if not data.contact or not data.contact.strip():
+            raise HTTPException(400, "联系方式不能为空")
+        if not data.password or not data.password.strip():
+            raise HTTPException(400, "密码不能为空")
+        if len(data.password) < 6:
+            raise HTTPException(400, "密码长度至少为6位")
+        if not data.captcha or not data.captcha.strip():
+            raise HTTPException(400, "验证码不能为空")
+        if not data.department or not data.department.strip():
+            raise HTTPException(400, "请选择部门")
+        
+        # 验证验证码
+        real_code = r.get(f"captcha:{data.contact}")
+        print("验证码从redis获取：", real_code)
+        if not real_code:
+            print("验证码已过期或不存在")
+            raise HTTPException(400, "验证码已过期或不存在，请重新获取")
+        if data.captcha != real_code:
+            print("验证码错误")
+            raise HTTPException(400, "验证码错误，请重新输入")
+        r.delete(f"captcha:{data.contact}")
 
-    # 自动生成账号
-    username = data.username.strip() if data.username else ""
-    if not username:
-        username = generate_random_username()
-    async with SessionLocal() as session:
-        result = await session.execute(select(User).where(User.username == username))
-        if result.scalar_one_or_none():
-            print("用户名已存在")
-            raise HTTPException(400, "用户名已存在")
-        hashed_password = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
-        
-        # 生成随机头像
-        avatar_url = generate_random_avatar()
-        
-        new_user = User(
-            username=username,
-            password=hashed_password,
-            contact=data.contact,
-            real_name="",
-            nick_name="",
-            avatar=avatar_url,  # 使用生成的头像
-            department=data.department
-        )
-        session.add(new_user)
-        await session.commit()
-        await session.refresh(new_user)  # 获取用户ID
-        
-        # 如果头像是外部URL，尝试下载并保存到本地
-        if avatar_url.startswith('https://'):
-            try:
-                local_avatar = save_avatar_from_url(avatar_url, new_user.id)
-                new_user.avatar = local_avatar
-                await session.commit()
-            except Exception as e:
-                print(f"下载头像失败，使用默认头像: {e}")
-                new_user.avatar = "avatar/default.svg"
-                await session.commit()
-        
-        print("注册成功，已生成随机头像")
-        return {"code": 0, "msg": "注册成功", "username": username, "department": data.department}
+        # 自动生成账号
+        username = data.username.strip() if data.username else ""
+        if not username:
+            username = generate_random_username()
+        async with SessionLocal() as session:
+            # 检查用户名是否已存在
+            result = await session.execute(select(User).where(User.username == username))
+            if result.scalar_one_or_none():
+                print("用户名已存在")
+                raise HTTPException(400, "用户名已存在")
+            
+            # 检查联系方式是否已存在
+            result = await session.execute(select(User).where(User.contact == data.contact))
+            if result.scalar_one_or_none():
+                print("联系方式已存在")
+                raise HTTPException(400, "该邮箱已被注册，请使用其他邮箱")
+            
+            hashed_password = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+            
+            # 生成随机头像
+            avatar_url = generate_random_avatar()
+            
+            new_user = User(
+                username=username,
+                password=hashed_password,
+                contact=data.contact,
+                real_name="",
+                nick_name="",
+                avatar=avatar_url,  # 使用生成的头像
+                department=data.department
+            )
+            session.add(new_user)
+            await session.commit()
+            await session.refresh(new_user)  # 获取用户ID
+            
+            # 如果头像是外部URL，尝试下载并保存到本地
+            if avatar_url.startswith('https://'):
+                try:
+                    local_avatar = save_avatar_from_url(avatar_url, new_user.id)
+                    new_user.avatar = local_avatar
+                    await session.commit()
+                except Exception as e:
+                    print(f"下载头像失败，使用默认头像: {e}")
+                    new_user.avatar = "avatar/default.svg"
+                    await session.commit()
+            
+            print("注册成功，已生成随机头像")
+            return {"code": 0, "msg": "注册成功", "username": username, "department": data.department}
+    except HTTPException:
+        # 重新抛出 HTTPException，让 FastAPI 处理
+        raise
+    except Exception as e:
+        print(f"注册过程中发生错误: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"注册失败: {str(e)}")
 
+# 用户登录接口
 @app.post("/auth/login")
 async def login(data: LoginRequest):
     try:
-        print("收到登录请求：", data.username, data.department)
+        print(f"[登录] 收到登录请求：用户名={data.username}, 部门={data.department}")
+        
+        if not data.username or not data.password or not data.department:
+            return JSONResponse(
+                status_code=400,
+                content={"code": 1, "msg": "用户名、密码和部门不能为空"}
+            )
+        
         async with SessionLocal() as session:
-            result = await session.execute(select(User).where(User.username == data.username, User.department == data.department))
-            user = result.scalar_one_or_none()
-            if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
-                return {"code": 1, "msg": "用户名、密码或部门错误"}
+            try:
+                result = await session.execute(
+                    select(User).where(
+                        User.username == data.username, 
+                        User.department == data.department
+                    )
+                )
+                user = result.scalar_one_or_none()
+            except Exception as db_error:
+                print(f"[登录] 数据库查询错误: {db_error}")
+                import traceback
+                traceback.print_exc()
+                return JSONResponse(
+                    status_code=500,
+                    content={"code": 500, "msg": f"数据库查询失败: {str(db_error)}"}
+                )
+            
+            if not user:
+                print(f"[登录] 用户不存在：{data.username}, 部门：{data.department}")
+                return JSONResponse(
+                    status_code=200,
+                    content={"code": 1, "msg": "用户名、密码或部门错误"}
+                )
+            
+            # 验证密码
+            try:
+                if not bcrypt.checkpw(data.password.encode(), user.password.encode()):
+                    print(f"[登录] 密码错误：{data.username}")
+                    return JSONResponse(
+                        status_code=200,
+                        content={"code": 1, "msg": "用户名、密码或部门错误"}
+                    )
+            except Exception as pwd_error:
+                print(f"[登录] 密码验证错误: {pwd_error}")
+                return JSONResponse(
+                    status_code=500,
+                    content={"code": 500, "msg": f"密码验证失败: {str(pwd_error)}"}
+                )
             
             # 检查用户是否有头像，如果没有则生成一个
             if not user.avatar or user.avatar == "":
-                avatar_url = generate_random_avatar()
-                user.avatar = avatar_url
-                
-                # 如果头像是外部URL，尝试下载并保存到本地
-                if avatar_url.startswith('https://'):
-                    try:
-                        local_avatar = save_avatar_from_url(avatar_url, user.id)
-                        user.avatar = local_avatar
-                    except Exception as e:
-                        print(f"下载头像失败，使用默认头像: {e}")
-                        user.avatar = "avatar/default.svg"
-                
-                await session.commit()
-                print(f"为用户 {user.username} 生成了随机头像: {user.avatar}")
+                try:
+                    avatar_url = generate_random_avatar()
+                    user.avatar = avatar_url
+                    
+                    # 如果头像是外部URL，尝试下载并保存到本地
+                    if avatar_url.startswith('https://'):
+                        try:
+                            local_avatar = save_avatar_from_url(avatar_url, user.id)
+                            user.avatar = local_avatar
+                        except Exception as e:
+                            print(f"[登录] 下载头像失败，使用默认头像: {e}")
+                            user.avatar = "avatar/default.svg"
+                    
+                    await session.commit()
+                    print(f"[登录] 为用户 {user.username} 生成了随机头像: {user.avatar}")
+                except Exception as avatar_error:
+                    print(f"[登录] 生成头像失败: {avatar_error}")
+                    # 头像生成失败不影响登录，继续执行
             
-            payload = {
-                "sub": str(user.id),
-                "exp": datetime.utcnow() + timedelta(hours=2)
-            }
-            token = jwt.encode(payload, SECRET_KEY, ALGORITHM)
+            # 生成 JWT token
+            try:
+                payload = {
+                    "sub": str(user.id),
+                    "exp": datetime.utcnow() + timedelta(hours=2)
+                }
+                token = jwt.encode(payload, SECRET_KEY, ALGORITHM)
+            except Exception as token_error:
+                print(f"[登录] Token 生成失败: {token_error}")
+                return JSONResponse(
+                    status_code=500,
+                    content={"code": 500, "msg": f"Token 生成失败: {str(token_error)}"}
+                )
+            
+            print(f"[登录] 登录成功：{user.username} (ID: {user.id})")
             return {
                 "code": 0,
                 "msg": "登录成功",
                 "data": {
                     "username": user.username,
                     "token": token,
-                    "avatar": user.avatar  # 返回头像信息
+                    "avatar": user.avatar or ""
                 }
             }
+    except HTTPException:
+        raise
     except Exception as e:
-        print("登录异常：", e)
-        return {"code": 500, "msg": f"登录异常: {str(e)}"}
+        print(f"[登录] 登录异常：{e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={"code": 500, "msg": f"登录异常: {str(e)}"}
+        )
 
-# 受保护路由
+# ========== 认证中间件 ==========
+# JWT Token验证函数
 def verify_token(request: Request):
     auth = request.headers.get("Authorization")
     if not auth or not auth.startswith("Bearer "):
@@ -398,76 +520,148 @@ def verify_token(request: Request):
             "sub": payload["sub"]
         }
     except jwt.ExpiredSignatureError:
-        print("token已过期")
-        raise HTTPException(401, "Token已过期")
+        print("令牌已过期")
+        raise HTTPException(401, "令牌已过期")
     except jwt.InvalidTokenError as e:
-        print("token无效:", e)
-        raise HTTPException(401, "无效Token")
+        print("令牌无效:", e)
+        raise HTTPException(401, "无效令牌")
 
+# ========== 用户信息API ==========
+# 测试受保护路由
 @app.get("/api/protected")
 async def protected_route(payload: dict = Depends(verify_token)):
     return {"msg": f"欢迎, {payload['sub']}"}
 
+# 获取用户信息接口
 @app.get("/auth/getUserInfo")
 async def get_user_info(payload: dict = Depends(verify_token)):
-    async with SessionLocal() as session:
-        result = await session.execute(select(User).where(User.id == int(payload["sub"])))  # sub转int
-        user = result.scalar_one_or_none()
-        if not user:
-            raise HTTPException(404, "用户不存在")
-        return {
-            "code": 0,
-            "data": {
-                "userId": user.id,
-                "userName": user.username,
-                "email": user.contact,
-                "realName": user.real_name,
-                "nickName": user.nick_name,
-                "theme": user.theme,
-                "language": user.language,
-                "avatar": user.avatar,
-                "department": user.department,
-                "roles": ["admin"],
-                "menus": [
-                    {
-                        "path": "/workbench",
-                        "name": "工作台",
-                        "icon": "icon-workbench"
-                    },
-                    {
-                        "path": "/schedule",
-                        "name": "日程管理",
-                        "icon": "icon-calendar"
-                    },
-                    {
-                        "path": "/meetings",
-                        "name": "会议管理",
-                        "icon": "icon-meeting"
-                    },
-                    {
-                        "path": "/knowledge",
-                        "name": "知识库",
-                        "icon": "icon-knowledge"
-                    },
-                    {
-                        "path": "/assistant",
-                        "name": "智能助手",
-                        "icon": "icon-ai"
-                    },
-                    {
-                        "path": "/system/user-center",
-                        "name": "个人中心",
-                        "icon": "icon-user"
-                    }
-                ],
-                "permissions": ["view_dashboard", "edit_profile", "manage_schedule", "manage_meetings", "use_ai_assistant"]
+    try:
+        user_id = int(payload.get("sub", payload.get("userId", 0)))
+        if not user_id:
+            raise HTTPException(401, "用户ID无效")
+        
+        async with SessionLocal() as session:
+            result = await session.execute(select(User).where(User.id == user_id))
+            user = result.scalar_one_or_none()
+            if not user:
+                print(f"[getUserInfo] 用户不存在: user_id={user_id}")
+                raise HTTPException(404, "用户不存在")
+            
+            # 安全地获取用户信息，处理可能为 None 的字段
+            return {
+                "code": 0,
+                "data": {
+                    "userId": user.id,
+                    "userName": user.username or "",
+                    "email": user.contact or "",
+                    "realName": user.real_name or "",
+                    "nickName": user.nick_name or "",
+                    "theme": user.theme or "auto",
+                    "language": user.language or "zh",
+                    "avatar": user.avatar or "",
+                    "department": user.department or "",
+                    "roles": ["admin"],
+                    "menus": [
+                        {
+                            "path": "/workbench",
+                            "name": "工作台",
+                            "icon": "icon-workbench"
+                        },
+                        {
+                            "path": "/schedule",
+                            "name": "日程管理",
+                            "icon": "icon-calendar"
+                        },
+                        {
+                            "path": "/meetings",
+                            "name": "会议管理",
+                            "icon": "icon-meeting"
+                        },
+                        {
+                            "path": "/knowledge",
+                            "name": "知识库",
+                            "icon": "icon-knowledge"
+                        },
+                        {
+                            "path": "/assistant",
+                            "name": "智能助手",
+                            "icon": "icon-ai"
+                        },
+                        {
+                            "path": "/system/user-center",
+                            "name": "个人中心",
+                            "icon": "icon-user"
+                        }
+                    ],
+                    "permissions": ["view_dashboard", "edit_profile", "manage_schedule", "manage_meetings", "use_ai_assistant"]
+                }
             }
-        }
+    except HTTPException:
+        raise
+    except ValueError as e:
+        print(f"[getUserInfo] 用户ID转换错误: {e}, payload: {payload}")
+        raise HTTPException(400, "用户ID格式错误")
+    except Exception as e:
+        print(f"[getUserInfo] 获取用户信息失败: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, f"获取用户信息失败: {str(e)}")
 
 # 初始化数据库
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+    # 检查并添加新字段到today_tasks表
+    try:
+        async with SessionLocal() as session:
+            # 检查表是否存在
+            try:
+                await session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='today_tasks'"))
+                table_exists = True
+            except Exception:
+                table_exists = False
+            
+            if table_exists:
+                # 尝试查询user_id字段，如果出错则添加字段
+                try:
+                    await session.execute(text("SELECT user_id FROM today_tasks LIMIT 1"))
+                    print("today_tasks 表已包含 user_id 字段")
+                except Exception:
+                    # 添加user_id字段
+                    try:
+                        await session.execute(text("ALTER TABLE today_tasks ADD COLUMN user_id INTEGER"))
+                        await session.commit()
+                        print("已添加 user_id 字段到 today_tasks 表")
+                        
+                        # 为现有任务分配默认用户ID（使用第一个用户，如果没有用户则设为0）
+                        try:
+                            result = await session.execute(select(User).limit(1))
+                            first_user = result.scalar_one_or_none()
+                            default_user_id = first_user.id if first_user else 0
+                            
+                            if default_user_id > 0:
+                                await session.execute(
+                                    text("UPDATE today_tasks SET user_id = :user_id WHERE user_id IS NULL"),
+                                    {"user_id": default_user_id}
+                                )
+                                await session.commit()
+                                print(f"已为现有任务分配默认用户ID: {default_user_id}")
+                            else:
+                                # 如果没有用户，删除所有现有任务
+                                await session.execute(text("DELETE FROM today_tasks WHERE user_id IS NULL"))
+                                await session.commit()
+                                print("已删除无用户关联的任务")
+                        except Exception as e:
+                            print(f"迁移现有任务数据失败: {e}")
+                    except Exception as alter_error:
+                        print(f"添加 user_id 字段失败: {alter_error}")
+            else:
+                print("today_tasks 表不存在，将在创建表时自动包含 user_id 字段")
+    except Exception as e:
+        print(f"today_tasks 表字段检查/添加失败: {e}")
+        import traceback
+        traceback.print_exc()
         
     # 检查并添加新字段到meetings表
     try:
@@ -503,6 +697,7 @@ async def on_startup():
 async def root():
     return {"message": "API服务运行正常"}
 
+# 健康检查接口
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
@@ -561,6 +756,24 @@ async def upload_doc(file: UploadFile = File(...), payload: dict = Depends(verif
                 from docx import Document
                 doc = Document(save_path)
                 content = "\n".join([p.text for p in doc.paragraphs])
+            elif ext == ".doc":
+                # 处理旧版Word格式(.doc)
+                try:
+                    # 尝试使用textract库（如果已安装）
+                    import textract
+                    content = textract.process(save_path).decode('utf-8')
+                except ImportError:
+                    # 如果textract未安装，尝试使用pypandoc
+                    try:
+                        import pypandoc
+                        content = pypandoc.convert_file(save_path, 'plain', format='doc')
+                    except ImportError:
+                        # 如果都未安装，提示用户安装
+                        content = "[错误: 需要安装textract或pypandoc库来解析.doc文件。请运行: pip install textract 或 pip install pypandoc]"
+                    except Exception as e:
+                        content = f"[解析DOC文件时出错: {str(e)}]"
+                except Exception as e:
+                    content = f"[解析DOC文件时出错: {str(e)}]"
             elif ext == ".pptx":
                 from pptx import Presentation
                 prs = Presentation(save_path)
@@ -570,6 +783,48 @@ async def upload_doc(file: UploadFile = File(...), payload: dict = Depends(verif
                         if hasattr(shape, "text"):
                             slides.append(shape.text)
                 content = "\n".join(slides)
+            elif ext in [".xls", ".xlsx"]:
+                try:
+                    import openpyxl
+                    wb = openpyxl.load_workbook(save_path)
+                    sheets_content = []
+                    for sheet_name in wb.sheetnames:
+                        sheet = wb[sheet_name]
+                        rows = []
+                        for row in sheet.iter_rows(values_only=True):
+                            row_data = [str(cell) if cell is not None else "" for cell in row]
+                            rows.append("\t".join(row_data))
+                        sheets_content.append(f"工作表: {sheet_name}\n" + "\n".join(rows))
+                    content = "\n\n---工作表分隔---\n\n".join(sheets_content)
+                except ImportError:
+                    content = "[错误: 需要安装openpyxl库]"
+                except Exception as e:
+                    content = f"[解析Excel文件时出错: {str(e)}]"
+            elif ext == ".csv":
+                try:
+                    import csv
+                    with open(save_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        reader = csv.reader(f)
+                        rows = []
+                        for row in reader:
+                            rows.append("\t".join(row))
+                        content = "\n".join(rows)
+                except Exception as e:
+                    content = f"[解析CSV文件时出错: {str(e)}]"
+            elif ext == ".pdf":
+                try:
+                    import PyPDF2
+                    with open(save_path, 'rb') as f:
+                        pdf_reader = PyPDF2.PdfReader(f)
+                        pages_text = []
+                        for page_num in range(len(pdf_reader.pages)):
+                            page = pdf_reader.pages[page_num]
+                            pages_text.append(page.extract_text())
+                        content = "\n\n".join(pages_text)
+                except ImportError:
+                    content = "[错误: 需要安装PyPDF2库]"
+                except Exception as e:
+                    content = f"[解析PDF文件时出错: {str(e)}]"
         except Exception:
             content = ""
         import datetime
@@ -672,9 +927,85 @@ async def download_doc(doc_id: int = Path(...), payload: dict = Depends(verify_t
         return {"code": 1, "msg": "无权限下载此文档"}
     
     file_path = os.path.join(uploads_dir, filename)
-    if not os.path.exists(file_path):
-        return {"code": 1, "msg": "文件不存在"}
-    return FileResponse(file_path, filename=filename)
+    
+    # 如果原始文件存在，直接下载
+    if os.path.exists(file_path):
+        # 检测文件类型
+        media_type, _ = mimetypes.guess_type(file_path)
+        if not media_type:
+            media_type = 'application/octet-stream'
+        
+        # 特殊处理常见文件类型
+        file_ext = os.path.splitext(filename)[1].lower()
+        if file_ext == '.pdf':
+            media_type = 'application/pdf'
+        elif file_ext in ['.doc', '.docx']:
+            media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' if file_ext == '.docx' else 'application/msword'
+        elif file_ext in ['.xls', '.xlsx']:
+            media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' if file_ext == '.xlsx' else 'application/vnd.ms-excel'
+        elif file_ext in ['.ppt', '.pptx']:
+            media_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation' if file_ext == '.pptx' else 'application/vnd.ms-powerpoint'
+        elif file_ext == '.txt':
+            media_type = 'text/plain; charset=utf-8'
+        
+        # 处理中文文件名编码
+        from urllib.parse import quote
+        encoded_filename = quote(filename.encode('utf-8'))
+        
+        response = FileResponse(
+            file_path,
+            media_type=media_type
+        )
+        # 设置Content-Disposition头，使用RFC 5987格式支持中文文件名
+        response.headers['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
+        return response
+    
+    # 如果原始文件不存在，导出文档内容为文本文件
+    doc_content = None
+    for item in doc_list:
+        if str(item.get('id')) == str(doc_id):
+            doc_content = item.get('content', '')
+            break
+    
+    if not doc_content:
+        return {"code": 1, "msg": "文档内容不存在"}
+    
+    # 移除HTML标签（如果存在）
+    if doc_content and '<' in doc_content and '>' in doc_content:
+        import re
+        import html
+        doc_content = re.sub(r'<[^>]+>', '', doc_content)
+        # 解码HTML实体
+        doc_content = html.unescape(doc_content)
+    
+    # 创建临时文件
+    temp_dir = os.path.join(uploads_dir, 'temp')
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_file_path = os.path.join(temp_dir, f'doc_{doc_id}_{int(time.time())}.txt')
+    
+    with open(temp_file_path, 'w', encoding='utf-8') as f:
+        f.write(doc_content)
+    
+    # 处理文件名（确保有.txt扩展名）
+    download_filename = filename
+    if '.' not in download_filename:
+        download_filename += '.txt'
+    elif not download_filename.lower().endswith('.txt'):
+        # 如果原文件名有其他扩展名，改为.txt
+        download_filename = os.path.splitext(download_filename)[0] + '.txt'
+    
+    # 处理中文文件名编码
+    from urllib.parse import quote
+    encoded_filename = quote(download_filename.encode('utf-8'))
+    
+    response = FileResponse(
+        temp_file_path,
+        media_type='text/plain; charset=utf-8'
+    )
+    # 设置Content-Disposition头，使用RFC 5987格式支持中文文件名
+    response.headers['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
+    
+    return response
 
 @app.get('/api/doc/{doc_id}')
 async def get_doc_detail(doc_id: int, payload: dict = Depends(verify_token)):
@@ -696,7 +1027,7 @@ async def get_doc_detail(doc_id: int, payload: dict = Depends(verify_token)):
 # ========== 知识库相关接口，操作 knowledge.json ==========
 @app.get("/api/knowledge")
 async def get_knowledge(q: str = Query("", alias="q"), page: int = 1, size: int = 20, payload: dict = Depends(verify_token)):
-    user_id = payload["userId"]
+    # 移除用户过滤，所有用户都可以查看所有知识库数据
     uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
     kb_path = os.path.join(uploads_dir, 'knowledge.json')
     if not os.path.exists(kb_path):
@@ -707,17 +1038,131 @@ async def get_knowledge(q: str = Query("", alias="q"), page: int = 1, size: int 
     except Exception as e:
         print(f'知识库读取失败: {e}')
         kb_list = []
-    kb_list = [item for item in kb_list if item.get("userId") == user_id]
+    # 移除用户过滤，显示所有文档
     if q:
         kb_list = [item for item in kb_list if q.lower() in item.get("filename", "").lower() or q.lower() in item.get("content", "").lower()]
+    
+    # 按ID排序（升序）
+    kb_list.sort(key=lambda x: int(x.get("id", 0)) if x.get("id") is not None else 0)
+    
     total = len(kb_list)
     start = (page - 1) * size
     end = start + size
     return {"total": total, "data": kb_list[start:end]}
 
+@app.get("/api/knowledge/{doc_id}/download")
+async def download_knowledge_doc(doc_id: int = Path(...), payload: dict = Depends(verify_token)):
+    """下载知识库文档"""
+    user_id = payload["userId"]
+    uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
+    kb_path = os.path.join(uploads_dir, 'knowledge.json')
+    doc_path = os.path.join(uploads_dir, 'doc.json')
+    
+    if not os.path.exists(kb_path):
+        return {"code": 1, "msg": "知识库不存在"}
+    
+    try:
+        with open(kb_path, 'r', encoding='utf-8') as f:
+            kb_list = json.load(f)
+        
+        # 查找文档（同时检查docId和id）
+        doc_item = None
+        for item in kb_list:
+            item_doc_id = item.get('docId')
+            item_id = item.get('id')
+            if (item_doc_id is not None and str(item_doc_id) == str(doc_id)) or \
+               (item_id is not None and str(item_id) == str(doc_id)):
+                doc_item = item
+                break
+        
+        if not doc_item:
+            return JSONResponse({"code": 1, "msg": "文档不存在"}, status_code=404)
+        
+        # 优先尝试从智能文档中下载原始文件
+        doc_id_for_file = doc_item.get('docId')
+        if doc_id_for_file and os.path.exists(doc_path):
+            with open(doc_path, 'r', encoding='utf-8') as f:
+                doc_list = json.load(f)
+            for doc in doc_list:
+                if str(doc.get('id')) == str(doc_id_for_file):
+                    filename = doc.get('filename')
+                    if filename:
+                        file_path = os.path.join(uploads_dir, filename)
+                        if os.path.exists(file_path):
+                            # 正确处理中文文件名编码
+                            from urllib.parse import quote
+                            # 对文件名进行URL编码，支持中文（RFC 5987格式）
+                            encoded_filename = quote(filename.encode('utf-8'))
+                            
+                            # 根据文件扩展名检测MIME类型
+                            file_ext = os.path.splitext(filename)[1].lower()
+                            media_type = mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+                            
+                            # 特殊处理常见文件类型
+                            if file_ext == '.pdf':
+                                media_type = 'application/pdf'
+                            elif file_ext in ['.doc', '.docx']:
+                                media_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' if file_ext == '.docx' else 'application/msword'
+                            elif file_ext in ['.xls', '.xlsx']:
+                                media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' if file_ext == '.xlsx' else 'application/vnd.ms-excel'
+                            elif file_ext in ['.ppt', '.pptx']:
+                                media_type = 'application/vnd.openxmlformats-officedocument.presentationml.presentation' if file_ext == '.pptx' else 'application/vnd.ms-powerpoint'
+                            elif file_ext == '.txt':
+                                media_type = 'text/plain; charset=utf-8'
+                            
+                            response = FileResponse(
+                                file_path,
+                                media_type=media_type
+                            )
+                            # 设置Content-Disposition头，使用RFC 5987格式支持中文文件名
+                            response.headers['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
+                            return response
+        
+        # 如果没有原始文件，将内容导出为文本文件
+        filename = doc_item.get('filename') or doc_item.get('title') or f'文档_{doc_id}'
+        # 确保文件名有扩展名
+        if '.' not in filename:
+            filename += '.txt'
+        
+        # 获取文档内容
+        content = doc_item.get('content', '')
+        # 移除HTML标签（如果存在）
+        if content and '<' in content and '>' in content:
+            import re
+            content = re.sub(r'<[^>]+>', '', content)
+            # 解码HTML实体
+            content = html.unescape(content)
+        
+        # 创建临时文件
+        temp_dir = os.path.join(uploads_dir, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_file_path = os.path.join(temp_dir, f'kb_doc_{doc_id}_{int(time.time())}.txt')
+        
+        with open(temp_file_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        # 返回文件，正确处理中文文件名编码
+        from urllib.parse import quote
+        # 对文件名进行URL编码，支持中文（RFC 5987格式）
+        encoded_filename = quote(filename.encode('utf-8'))
+        
+        response = FileResponse(
+            temp_file_path, 
+            media_type='text/plain; charset=utf-8'
+        )
+        # 设置Content-Disposition头，使用RFC 5987格式支持中文文件名
+        # 使用filename*参数，这是RFC 5987标准，支持UTF-8编码
+        response.headers['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
+        return response
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"code": 1, "msg": f"下载失败: {str(e)}"}, status_code=500)
+
 @app.get("/api/knowledge/detail")
 async def knowledge_detail(id: int = Query(...), payload: dict = Depends(verify_token)):
-    user_id = payload["userId"]
+    # 移除权限检查，所有用户都可以查看文档详情
     uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
     kb_path = os.path.join(uploads_dir, 'knowledge.json')
     if not os.path.exists(kb_path):
@@ -726,9 +1171,7 @@ async def knowledge_detail(id: int = Query(...), payload: dict = Depends(verify_
         kb_list = json.load(f)
     for item in kb_list:
         if str(item.get('docId', item.get('id'))) == str(id):
-            # 检查文档所有权
-            if item.get("userId") != user_id:
-                return {"code": 1, "msg": "无权限访问此文档"}
+            # 移除权限检查，所有用户都可以访问
             return {"code": 0, "data": item}
     return {"code": 1, "msg": "未找到文档"}
 
@@ -737,6 +1180,7 @@ async def knowledge_edit(data: dict = Body(...), payload: dict = Depends(verify_
     user_id = payload["userId"]
     doc_id = data.get("id")
     content = data.get("content")
+    knowledge_base = data.get("knowledge_base")  # 支持更新知识库
     uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
     kb_path = os.path.join(uploads_dir, 'knowledge.json')
     if not os.path.exists(kb_path):
@@ -749,7 +1193,10 @@ async def knowledge_edit(data: dict = Body(...), payload: dict = Depends(verify_
             # 检查文档所有权
             if item.get("userId") != user_id:
                 return {"code": 1, "msg": "无权限编辑此文档"}
-            item['content'] = content
+            if content is not None:
+                item['content'] = content
+            if knowledge_base is not None:
+                item['knowledge_base'] = knowledge_base
             updated = True
             break
     if not updated:
@@ -759,7 +1206,11 @@ async def knowledge_edit(data: dict = Body(...), payload: dict = Depends(verify_
     return {"code": 0, "msg": "保存成功"}
 
 @app.post("/api/knowledge/upload")
-async def knowledge_upload(file: UploadFile = File(...), payload: dict = Depends(verify_token)):
+async def knowledge_upload(
+    file: UploadFile = File(...), 
+    knowledge_base: str = Form(None),
+    payload: dict = Depends(verify_token)
+):
     user_id = payload["userId"]
     uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
     kb_path = os.path.join(uploads_dir, 'knowledge.json')
@@ -790,6 +1241,24 @@ async def knowledge_upload(file: UploadFile = File(...), payload: dict = Depends
             from docx import Document
             doc = Document(save_path)
             content = "\n".join([p.text for p in doc.paragraphs])
+        elif ext == ".doc":
+            # 处理旧版Word格式(.doc)
+            try:
+                # 尝试使用textract库（如果已安装）
+                import textract
+                content = textract.process(save_path).decode('utf-8')
+            except ImportError:
+                # 如果textract未安装，尝试使用pypandoc
+                try:
+                    import pypandoc
+                    content = pypandoc.convert_file(save_path, 'plain', format='doc')
+                except ImportError:
+                    # 如果都未安装，提示用户安装
+                    content = "[错误: 需要安装textract或pypandoc库来解析.doc文件。请运行: pip install textract 或 pip install pypandoc]"
+                except Exception as e:
+                    content = f"[解析DOC文件时出错: {str(e)}]"
+            except Exception as e:
+                content = f"[解析DOC文件时出错: {str(e)}]"
         elif ext == ".pptx":
             from pptx import Presentation
             prs = Presentation(save_path)
@@ -799,14 +1268,28 @@ async def knowledge_upload(file: UploadFile = File(...), payload: dict = Depends
                     if hasattr(shape, "text"):
                         slides.append(shape.text)
             content = "\n".join(slides)
+        elif ext == ".pdf":
+            try:
+                import PyPDF2
+                with open(save_path, 'rb') as f:
+                    pdf_reader = PyPDF2.PdfReader(f)
+                    pages_text = []
+                    for page_num in range(len(pdf_reader.pages)):
+                        page = pdf_reader.pages[page_num]
+                        pages_text.append(page.extract_text())
+                    content = "\n\n".join(pages_text)
+            except ImportError:
+                content = "[错误: 需要安装PyPDF2库]"
+            except Exception as e:
+                content = f"[解析PDF文件时出错: {str(e)}]"
     except Exception:
         content = ""
     import datetime
     upload_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    # 生成自增id
+    # 生成自增id - 检查所有文档的ID，确保全局唯一
     max_id = 0
     for item in kb_list:
-        if item.get("userId") == user_id:
+        # 移除用户过滤，检查所有文档的ID以确保全局唯一
             try:
                 iid = int(item.get("id", 0))
                 if iid > max_id:
@@ -819,7 +1302,8 @@ async def knowledge_upload(file: UploadFile = File(...), payload: dict = Depends
         "filename": file.filename,
         "content": content,
         "upload_time": upload_time,
-        "userId": user_id
+        "userId": user_id,
+        "knowledge_base": knowledge_base or ""  # 保存知识库分类
     })
     with open(kb_path, 'w', encoding='utf-8') as f:
         json.dump(kb_list, f, ensure_ascii=False, indent=2)
@@ -844,10 +1328,31 @@ async def knowledge_delete(data: dict = Body(...), payload: dict = Depends(verif
     deleted_count = 0
     
     for item in kb_list:
-        item_id = str(item.get('docId', item.get('id')))
-        if item_id in ids_to_delete:
-            # 检查文档所有权
-            if item.get("userId") == user_id:
+        item_doc_id = item.get('docId')
+        item_id = item.get('id')
+        # 检查是否在删除列表中（同时检查docId和id）
+        should_delete = False
+        for delete_id in ids_to_delete:
+            if (item_doc_id is not None and str(item_doc_id) == str(delete_id)) or \
+               (item_id is not None and str(item_id) == str(delete_id)):
+                should_delete = True
+                break
+        
+        if should_delete:
+            # 获取当前用户信息，检查部门和角色
+            current_user_department = ""
+            async with SessionLocal() as session:
+                result = await session.execute(select(User).where(User.id == user_id))
+                current_user = result.scalar_one_or_none()
+                if current_user:
+                    current_user_department = current_user.department or ""
+            
+            # 定义有删除所有文档权限的部门
+            admin_departments = ["人事部", "技术部", "管理部", "行政部"]
+            is_admin_user = current_user_department in admin_departments
+            
+            # 权限检查：1. 文档所有者可以删除 2. 管理员部门可以删除所有文档
+            if item.get("userId") == user_id or is_admin_user:
                 deleted_count += 1
                 continue  # 跳过此项（即删除）
             else:
@@ -858,15 +1363,15 @@ async def knowledge_delete(data: dict = Body(...), payload: dict = Depends(verif
             new_list.append(item)
     
     if deleted_count == 0:
-        return {"code": 1, "msg": "没有可删除的文档或无权限删除"}
+        return {"code": 1, "msg": "没有可删除的文档或无权限删除", "deleted_count": 0}
     
     with open(kb_path, 'w', encoding='utf-8') as f:
         json.dump(new_list, f, ensure_ascii=False, indent=2)
-    return {"code": 0, "msg": f"成功删除 {deleted_count} 个文档"}
+    return {"code": 0, "msg": f"成功删除 {deleted_count} 个文档", "deleted_count": deleted_count}
 
 @app.get("/api/knowledge/search")
 async def knowledge_search(kw: str = Query(""), payload: dict = Depends(verify_token)):
-    user_id = payload["userId"]
+    # 移除用户过滤，所有用户都可以搜索所有文档
     uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
     kb_path = os.path.join(uploads_dir, 'knowledge.json')
     if not os.path.exists(kb_path):
@@ -874,15 +1379,239 @@ async def knowledge_search(kw: str = Query(""), payload: dict = Depends(verify_t
     with open(kb_path, 'r', encoding='utf-8') as f:
         kb_list = json.load(f)
     
-    # 只搜索当前用户的文档
-    user_docs = [item for item in kb_list if item.get("userId") == user_id]
-    
+    # 移除用户过滤，搜索所有文档
     result = [
-        item for item in user_docs
+        item for item in kb_list
         if kw.lower() in (item.get("title", "") + item.get("filename", "")).lower()
         or kw.lower() in item.get("content", "").lower()
     ]
+    # 按ID排序（升序）
+    result.sort(key=lambda x: int(x.get("id", 0)) if x.get("id") is not None else 0)
     return {"data": result}
+
+@app.post("/api/knowledge/restore")
+async def restore_knowledge_docs(payload: dict = Depends(verify_token)):
+    """从备份文件或智能文档中恢复被覆盖删除的文档"""
+    import shutil
+    from datetime import datetime
+    import glob
+    
+    user_id = payload["userId"]
+    uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
+    kb_path = os.path.join(uploads_dir, 'knowledge.json')
+    doc_path = os.path.join(uploads_dir, 'doc.json')
+    
+    try:
+        # 读取当前知识库
+        current_kb_list = []
+        if os.path.exists(kb_path):
+            with open(kb_path, 'r', encoding='utf-8') as f:
+                current_kb_list = json.load(f)
+        
+        # 读取智能文档列表
+        doc_list = []
+        if os.path.exists(doc_path):
+            with open(doc_path, 'r', encoding='utf-8') as f:
+                doc_list = json.load(f)
+        
+        # 获取所有备份文件，按时间排序（最新的在前）
+        backup_files = glob.glob(os.path.join(uploads_dir, 'knowledge.json.backup.*'))
+        backup_files.sort(reverse=True)
+        
+        restored_count = 0
+        restored_docs = []
+        
+        # 方法1：从最新的备份文件中恢复丢失的文档
+        if backup_files:
+            latest_backup = backup_files[0]
+            with open(latest_backup, 'r', encoding='utf-8') as f:
+                backup_kb_list = json.load(f)
+            
+            # 获取当前知识库中所有docId的集合
+            current_doc_ids = {str(item.get('docId', item.get('id'))) for item in current_kb_list}
+            
+            # 从备份中找到丢失的文档
+            for backup_item in backup_kb_list:
+                backup_doc_id = str(backup_item.get('docId', backup_item.get('id')))
+                # 如果备份中的文档不在当前知识库中，则恢复
+                if backup_doc_id not in current_doc_ids:
+                    # 检查是否已存在相同ID的文档（避免重复）
+                    exists = False
+                    for current_item in current_kb_list:
+                        if str(current_item.get('id')) == str(backup_item.get('id')):
+                            exists = True
+                            break
+                    
+                    if not exists:
+                        current_kb_list.append(backup_item)
+                        restored_count += 1
+                        restored_docs.append({
+                            'id': backup_item.get('id'),
+                            'title': backup_item.get('title', backup_item.get('filename', ''))
+                        })
+        
+        # 方法2：从智能文档中恢复应该存在但丢失的文档
+        # 获取知识库中所有docId
+        kb_doc_ids = {str(item.get('docId')) for item in current_kb_list if item.get('docId')}
+        
+        # 检查智能文档中哪些应该被推送到知识库但不存在
+        for doc_item in doc_list:
+            doc_id = str(doc_item.get('id'))
+            # 如果智能文档不在知识库中，且是当前用户的文档，则恢复
+            if doc_id not in kb_doc_ids and str(doc_item.get('userId')) == str(user_id):
+                # 检查是否已存在相同ID的知识库文档
+                exists = False
+                for kb_item in current_kb_list:
+                    if str(kb_item.get('id')) == doc_id or str(kb_item.get('docId')) == doc_id:
+                        exists = True
+                        break
+                
+                if not exists:
+                    # 重新生成知识库ID，确保不冲突
+                    max_id = 0
+                    used_ids = set()
+                    for item in current_kb_list:
+                        try:
+                            kb_id = int(item.get("id", 0))
+                            if kb_id > max_id:
+                                max_id = kb_id
+                            if kb_id > 0:
+                                used_ids.add(kb_id)
+                        except Exception:
+                            pass
+                    
+                    new_kb_id = max_id + 1
+                    while new_kb_id == int(doc_id) or new_kb_id in used_ids:
+                        new_kb_id += 1
+                    
+                    # 添加恢复的文档
+                    restored_item = {
+                        "id": new_kb_id,
+                        "docId": int(doc_id),
+                        "title": doc_item.get('filename', ''),
+                        "filename": doc_item.get('filename', ''),
+                        "content": doc_item.get('content', ''),
+                        "type": doc_item.get('type', '文档'),
+                        "userId": user_id,
+                        "upload_time": doc_item.get('upload_time', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                        "knowledge_base": ""
+                    }
+                    current_kb_list.append(restored_item)
+                    restored_count += 1
+                    restored_docs.append({
+                        'id': new_kb_id,
+                        'title': restored_item.get('title', '')
+                    })
+        
+        # 保存恢复后的知识库
+        if restored_count > 0:
+            # 创建备份
+            backup_path = kb_path + f".backup.before_restore.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            if os.path.exists(kb_path):
+                shutil.copy2(kb_path, backup_path)
+            
+            # 保存恢复后的数据
+            with open(kb_path, 'w', encoding='utf-8') as f:
+                json.dump(current_kb_list, f, ensure_ascii=False, indent=2)
+            
+            return {
+                "code": 0,
+                "msg": f"成功恢复 {restored_count} 个文档",
+                "data": {
+                    "restored_count": restored_count,
+                    "restored_docs": restored_docs,
+                    "backup_file": backup_path if os.path.exists(backup_path) else None
+                }
+            }
+        else:
+            return {
+                "code": 0,
+                "msg": "未发现需要恢复的文档",
+                "data": {
+                    "restored_count": 0,
+                    "restored_docs": []
+                }
+            }
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"code": 1, "msg": f"恢复失败: {str(e)}"}
+
+@app.post("/api/knowledge/fix-ids")
+async def fix_knowledge_ids(payload: dict = Depends(verify_token)):
+    """修复知识库中重复的ID，重新分配唯一ID"""
+    import shutil
+    from datetime import datetime
+    
+    uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
+    kb_path = os.path.join(uploads_dir, 'knowledge.json')
+    
+    if not os.path.exists(kb_path):
+        return {"code": 1, "msg": "知识库文件不存在"}
+    
+    try:
+        # 读取原始数据
+        with open(kb_path, 'r', encoding='utf-8') as f:
+            kb_list = json.load(f)
+        
+        if not isinstance(kb_list, list):
+            return {"code": 1, "msg": "数据格式不正确"}
+        
+        # 检测重复ID
+        id_count = {}
+        duplicates = []
+        for idx, item in enumerate(kb_list):
+            item_id = item.get('id')
+            if item_id is None:
+                continue
+            if item_id in id_count:
+                id_count[item_id].append(idx)
+                duplicates.append(item_id)
+            else:
+                id_count[item_id] = [idx]
+        
+        # 创建备份
+        backup_path = kb_path + f".backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        try:
+            shutil.copy2(kb_path, backup_path)
+        except Exception as e:
+            return {"code": 1, "msg": f"创建备份失败: {e}"}
+        
+        # 重新分配ID（从1开始，每个文档都分配唯一ID）
+        # 直接为每个文档分配新的唯一ID，确保每个文档都有唯一ID
+        current_id = 1
+        for item in kb_list:
+            # 直接分配新ID，不管原来的ID是什么
+            item['id'] = current_id
+            # 同时更新docId字段，确保docId和id保持一致
+            if 'docId' in item:
+                item['docId'] = current_id
+            current_id += 1
+        
+        # 验证新ID的唯一性
+        new_ids = [item.get('id') for item in kb_list if item.get('id') is not None]
+        if len(new_ids) != len(set(new_ids)):
+            return {"code": 1, "msg": "重新分配后仍有重复ID"}
+        
+        # 保存更新后的数据
+        with open(kb_path, 'w', encoding='utf-8') as f:
+            json.dump(kb_list, f, ensure_ascii=False, indent=2)
+        
+        return {
+            "code": 0,
+            "msg": "修复成功",
+            "data": {
+                "total": len(kb_list),
+                "unique_ids": len(set(new_ids)),
+                "duplicates_fixed": len(set(duplicates)) if duplicates else 0,
+                "backup_file": backup_path
+            }
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"code": 1, "msg": f"修复失败: {str(e)}"}
 
 @app.post("/api/knowledge/qa")
 async def knowledge_qa(data: dict = Body(...), payload: dict = Depends(verify_token)):
@@ -914,8 +1643,8 @@ async def knowledge_qa(data: dict = Body(...), payload: dict = Depends(verify_to
     except Exception as e:
         return {"code": 1, "msg": f"读取知识库失败: {e}"}
     
-    # 只使用当前用户的文档
-    kb_list = [item for item in kb_list if item.get("userId") == user_id]
+    # 移除用户过滤，所有用户都可以使用所有文档进行问答
+    # kb_list = [item for item in kb_list if item.get("userId") == user_id]  # 已移除用户过滤
     
     # 过滤知识库
     if knowledge_base:
@@ -1110,27 +1839,59 @@ async def delete_knowledge(doc_id: int = Path(...), payload: dict = Depends(veri
     if not os.path.exists(kb_path):
         return {"code": 1, "msg": "知识库不存在"}
     try:
+        # 获取当前用户信息，检查部门和角色
+        current_user_department = ""
+        current_user_roles = []
+        async with SessionLocal() as session:
+            result = await session.execute(select(User).where(User.id == user_id))
+            current_user = result.scalar_one_or_none()
+            if current_user:
+                current_user_department = current_user.department or ""
+                # 可以从用户信息中获取角色，这里假设有roles字段或通过其他方式判断
+                # 暂时通过部门判断权限
+        
+        # 定义有删除所有文档权限的部门
+        admin_departments = ["人事部", "技术部", "管理部", "行政部"]
+        is_admin_user = current_user_department in admin_departments
+        
         with open(kb_path, 'r', encoding='utf-8') as f:
             kb_list = json.load(f)
         
         # 检查文档是否存在以及权限
         doc_found = False
         doc_owned = False
+        doc_user_id = None
         for item in kb_list:
             if str(item.get('docId', item.get('id'))) == str(doc_id):
                 doc_found = True
-                if item.get("userId") == user_id:
+                doc_user_id = item.get("userId")
+                if doc_user_id == user_id:
                     doc_owned = True
                 break
         
         if not doc_found:
             return {"code": 1, "msg": "文档不存在"}
         
-        if not doc_owned:
-            return {"code": 1, "msg": "无权限删除此文档"}
+        # 权限检查：1. 文档所有者可以删除 2. 管理员部门可以删除所有文档
+        if not doc_owned and not is_admin_user:
+            return {"code": 1, "msg": f"无权限删除此文档。只有文档上传者或{', '.join(admin_departments)}的成员可以删除文档。"}
         
-        # 删除文档
-        new_list = [item for item in kb_list if str(item.get('docId', item.get('id'))) != str(doc_id)]
+        # 删除文档（同时检查docId和id字段）
+        new_list = []
+        deleted = False
+        for item in kb_list:
+            item_doc_id = item.get('docId')
+            item_id = item.get('id')
+            # 匹配docId或id
+            if str(item_doc_id) == str(doc_id) or str(item_id) == str(doc_id):
+                deleted = True
+                continue  # 跳过此项（即删除）
+            new_list.append(item)
+        
+        if not deleted:
+            return {"code": 1, "msg": "文档不存在或已被删除"}
+        
+        # 保存更新后的列表
         with open(kb_path, 'w', encoding='utf-8') as f:
             json.dump(new_list, f, ensure_ascii=False, indent=2)
         return {"code": 0, "msg": "删除成功"}
@@ -1178,39 +1939,44 @@ async def push_to_knowledge(data: dict = Body(...), payload: dict = Depends(veri
     else:
         kb_list = []
     
-    # 查找是否已存在（同一用户的相同文档）
+    
+    # 查找是否已存在（同一用户的相同docId文档，避免重复推送）
     found = False
     for item in kb_list:
-        if (item.get("docId") == doc_id and item.get("userId") == user_id) or \
-           (item.get("title") == title and item.get("userId") == user_id):
-            # 更新现有记录
-            item["docId"] = doc_id
+        if item.get("docId") == doc_id and item.get("userId") == user_id:
+            # 如果已存在，更新现有记录（只更新内容，不改变ID）
             item["title"] = title
             item["filename"] = title
             item["content"] = content
             item["type"] = doc_type
-            item["userId"] = user_id
             item["upload_time"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             found = True
             break
     
     if not found:
-        # 生成新的知识库ID
+        # 生成新的知识库ID - 检查所有文档的ID，确保全局唯一且不与智能文档ID冲突
         max_id = 0
+        used_ids = set()
         for item in kb_list:
-            if item.get("userId") == user_id:
-                try:
-                    kb_id = int(item.get("id", 0))
-                    if kb_id > max_id:
-                        max_id = kb_id
-                except Exception:
-                    pass
-        new_id = max_id + 1
+            try:
+                kb_id = int(item.get("id", 0))
+                if kb_id > max_id:
+                    max_id = kb_id
+                if kb_id > 0:
+                    used_ids.add(kb_id)
+            except Exception:
+                pass
         
-        # 添加新记录
+        # 生成新ID，确保不与现有ID重复，也不与智能文档ID相同
+        new_id = max_id + 1
+        # 如果新ID与doc_id相同，则继续递增直到找到不冲突的ID
+        while new_id == int(doc_id) or new_id in used_ids:
+            new_id += 1
+        
+        # 添加新记录，知识库ID与智能文档ID分开
         kb_list.append({
-            "id": new_id,
-            "docId": doc_id,
+            "id": new_id,           # 知识库自增ID，与智能文档ID分开
+            "docId": doc_id,       # 保存智能文档的ID作为关联字段
             "title": title,
             "filename": title,
             "content": content,
@@ -1283,62 +2049,132 @@ async def create_meeting(data: MeetingCreateRequest, payload: dict = Depends(ver
         await session.commit()
         return {"code": 0, "msg": "会议已安排", "meetingId": new_meeting.id}
 
+# 删除会议接口
+@app.post("/api/meetings/delete")
+async def delete_meeting(data: dict = Body(...), payload: dict = Depends(verify_token)):
+    meeting_id = data.get("id")
+    if not meeting_id:
+        return {"code": 1, "msg": "未提供会议ID"}
+    
+    user_id = payload["userId"]
+    try:
+        async with MeetingSessionLocal() as session:
+            result = await session.execute(select(Meeting).where(Meeting.id == int(meeting_id)))
+            meeting = result.scalar_one_or_none()
+            
+            if not meeting:
+                return {"code": 1, "msg": "会议不存在"}
+            
+            # 只有创建者或主持人才可以删除会议
+            if meeting.user_id != user_id and meeting.host_user_id != user_id:
+                return {"code": 1, "msg": "无权限删除该会议"}
+            
+            await session.delete(meeting)
+            await session.commit()
+            return {"code": 0, "msg": "会议删除成功"}
+    except Exception as e:
+        print(f"删除会议失败: {e}")
+        return {"code": 1, "msg": "删除会议失败"}
+
 # 会议列表接口
 @app.get("/api/meetings/list")
-async def list_meetings(page: int = 1, pageSize: int = 10, payload: dict = Depends(verify_token)):
-    user_id = payload["userId"]
-    async with MeetingSessionLocal() as session:
-        # 查询用户相关的会议：创建者、主持人、参会人
-        result = await session.execute(select(Meeting))
-        all_meetings = result.scalars().all()
-        
-        # 过滤出用户相关的会议
-        user_meetings = []
-        for meeting in all_meetings:
-            is_related = False
+async def list_meetings(
+    page: int = 1, 
+    pageSize: int = 10, 
+    status: str = None,
+    kw: str = None,
+    payload: dict = Depends(verify_token)
+):
+    try:
+        user_id = payload["userId"]
+        async with MeetingSessionLocal() as session:
+            # 查询用户相关的会议：创建者、主持人、参会人
+            try:
+                result = await session.execute(select(Meeting))
+                all_meetings = result.scalars().all()
+            except Exception as e:
+                print(f"[list_meetings] 查询会议失败: {e}")
+                return {"code": 1, "msg": "获取会议列表失败", "data": {"list": [], "total": 0}}
             
-            # 1. 是创建者
-            if meeting.user_id == user_id:
-                is_related = True
+            # 过滤出用户相关的会议
+            user_meetings = []
+            for meeting in all_meetings:
+                try:
+                    is_related = False
+                    
+                    # 1. 是创建者
+                    if meeting.user_id and meeting.user_id == user_id:
+                        is_related = True
+                    
+                    # 2. 是主持人
+                    elif meeting.host_user_id and meeting.host_user_id == user_id:
+                        is_related = True
+                    
+                    # 3. 是参会人
+                    elif meeting.participants:
+                        try:
+                            participant_ids = [int(pid.strip()) for pid in meeting.participants.split(",") if pid.strip().isdigit()]
+                            if user_id in participant_ids:
+                                is_related = True
+                        except Exception:
+                            pass  # 忽略解析错误
+                    
+                    if is_related:
+                        user_meetings.append(meeting)
+                except Exception as e:
+                    print(f"[获取会议列表] 处理会议 {meeting.id} 时出错: {e}")
+                    continue
             
-            # 2. 是主持人
-            elif meeting.host_user_id == user_id:
-                is_related = True
+            # 根据状态过滤（如果提供了状态参数且不为空）
+            if status and status.strip():
+                user_meetings = [m for m in user_meetings if (m.status or "upcoming") == status]
             
-            # 3. 是参会人
-            elif meeting.participants:
-                participant_ids = [int(pid.strip()) for pid in meeting.participants.split(",") if pid.strip().isdigit()]
-                if user_id in participant_ids:
-                    is_related = True
+            # 根据关键词搜索（如果提供了关键词且不为空）
+            if kw and kw.strip():
+                kw_lower = kw.strip().lower()
+                user_meetings = [
+                    m for m in user_meetings 
+                    if (m.title and kw_lower in m.title.lower()) or 
+                       (m.host and kw_lower in m.host.lower())
+                ]
             
-            if is_related:
-                user_meetings.append(meeting)
-        
-        # 分页处理
-        total = len(user_meetings)
-        start = (page - 1) * pageSize
-        end = start + pageSize
-        data = []
-        
-        for m in user_meetings[start:end]:
-            # 解析参会人ID列表
-            participant_ids = []
-            if m.participants:
-                participant_ids = [int(pid.strip()) for pid in m.participants.split(",") if pid.strip().isdigit()]
+            # 分页处理
+            total = len(user_meetings)
+            start = (page - 1) * pageSize
+            end = start + pageSize
+            data = []
             
-            data.append({
-                "id": m.id,
-                "title": m.title,
-                "host": m.host,
-                "time": m.time,
-                "location": m.location,
-                "period": m.period,
-                "status": m.status,
-                "participants": participant_ids,
-                "host_user_id": m.host_user_id
-            })
-        
-        return {"code": 0, "data": {"list": data, "total": total}}
+            for m in user_meetings[start:end]:
+                try:
+                    # 解析参会人ID列表
+                    participant_ids = []
+                    if m.participants:
+                        try:
+                            participant_ids = [int(pid.strip()) for pid in m.participants.split(",") if pid.strip().isdigit()]
+                        except Exception:
+                            participant_ids = []
+                    
+                    data.append({
+                        "id": m.id,
+                        "title": m.title or "",
+                        "host": m.host or "",
+                        "time": m.time or "",
+                        "location": m.location or "",
+                        "period": m.period or "",
+                        "status": m.status or "upcoming",
+                        "participants": participant_ids,
+                        "host_user_id": getattr(m, 'host_user_id', 0) or 0
+                    })
+                except Exception as e:
+                    print(f"[获取会议列表] 序列化会议 {m.id} 时出错: {e}")
+                    continue
+            
+            return {"code": 0, "data": {"list": data, "total": total}}
+    except Exception as e:
+        print(f"[获取会议列表] 发生错误: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"code": 1, "msg": f"获取会议列表失败: {str(e)}", "data": {"list": [], "total": 0}}
 
 # 会议室列表接口（静态返回）
 @app.get("/api/meetings/rooms")
@@ -1422,42 +2258,282 @@ async def edit_meeting(data: dict = Body(...), payload: dict = Depends(verify_to
         await session.commit()
         return {"code": 0, "msg": "保存成功"}
 
+@app.post("/api/assistant/analyze-file")
+async def analyze_file(data: dict = Body(...), payload: dict = Depends(verify_token)):
+    """分析上传的文件内容"""
+    file_url = data.get("file_url", "")
+    user_question = data.get("question", "")
+    
+    if not file_url:
+        return {"code": 1, "msg": "文件URL不能为空"}
+    
+    # 从环境变量读取API KEY，如果没有则使用默认值
+    QWEN_API_KEY = os.getenv("QWEN_API_KEY", "sk-751689471abb4aaf9d7169c86884b1a0")
+    
+    try:
+        # 解析文件路径
+        if file_url.startswith('/uploads/assistant/'):
+            uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
+            file_path = os.path.join(uploads_dir, 'assistant', file_url.split('assistant/')[-1])
+        else:
+            return {"code": 1, "msg": "不支持的文件路径格式"}
+        
+        if not os.path.exists(file_path):
+            return {"code": 1, "msg": "文件不存在"}
+        
+        # 提取文件内容
+        file_ext = os.path.splitext(file_path)[1]
+        file_content = extract_file_content(file_path, file_ext)
+        
+        if not file_content or file_content.startswith("[错误") or file_content.startswith("[不支持"):
+            return {"code": 1, "msg": f"无法提取文件内容: {file_content}"}
+        
+        # 限制内容长度（避免超过API限制）
+        max_content_length = 30000  # 约30000字符
+        if len(file_content) > max_content_length:
+            file_content = file_content[:max_content_length] + "\n\n[内容已截断，仅显示前30000字符]"
+        
+        # 构建提示词
+        if not user_question or user_question.strip() == "":
+            prompt = f"""请详细分析以下文件内容，包括：
+1. 文件的主要内容和主题
+2. 关键信息和要点
+3. 文件的结构和组织方式
+4. 任何重要的数据、数字或统计信息
+5. 总结和建议
+
+文件内容：
+{file_content}
+
+请用简体中文回答，提供详细、结构化的分析。"""
+        else:
+            prompt = f"""请根据以下问题分析文件内容：
+
+问题：{user_question}
+
+文件内容：
+{file_content}
+
+请用简体中文回答，提供详细、准确的分析。"""
+        
+        # 调用通义千问API
+        url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+        headers = {
+            "Authorization": f"Bearer {QWEN_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "qwen-turbo",
+            "input": {
+                "prompt": prompt
+            },
+            "parameters": {
+                "result_format": "message"
+            }
+        }
+        
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+        
+        # 检查HTTP状态码
+        if resp.status_code != 200:
+            return {"code": 1, "msg": f"API调用失败，状态码: {resp.status_code}"}
+        
+        result = resp.json()
+        
+        # 检查是否有错误
+        if "error" in result:
+            return {"code": 1, "msg": f"API错误: {result.get('error', {}).get('message', '未知错误')}"}
+        
+        # 解析返回结果
+        reply = result.get("output", {}).get("text")
+        if not reply:
+            choices = result.get("output", {}).get("choices")
+            if choices and isinstance(choices, list) and len(choices) > 0:
+                reply = choices[0].get("message", {}).get("content")
+        
+        # 确保reply是字符串
+        if reply:
+            reply_str = str(reply) if reply else "分析完成，但未返回内容"
+            return {"code": 0, "data": {"reply": reply_str, "content_length": len(file_content)}}
+        else:
+            error_msg = result.get("message", "文件分析失败，API未返回有效内容")
+            return {"code": 1, "msg": str(error_msg), "debug": result}
+    
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return {"code": 1, "msg": f"文件分析异常: {str(e)}", "detail": error_detail}
+
 @app.post("/api/assistant/chat")
 async def assistant_chat(data: dict = Body(...)):
     user_message = data.get("message", "")
-    QWEN_API_KEY = "sk-751689471abb4aaf9d7169c86884b1a0"
-    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
-    headers = {
-        "Authorization": f"Bearer {QWEN_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    # 强制中文回答
-    prompt = f"请用简体中文回答：{user_message}"
-    payload = {
-        "model": "qwen-turbo",
-        "input": {
-            "prompt": prompt
-        },
-        "parameters": {
-            "result_format": "message"
+    image_url = data.get("image_url", "")  # 获取图片URL
+    # 从环境变量读取API KEY，如果没有则使用默认值
+    QWEN_API_KEY = os.getenv("QWEN_API_KEY", "sk-751689471abb4aaf9d7169c86884b1a0")
+    
+    # 如果有图片，使用多模态模型
+    if image_url:
+        # 使用通义千问多模态模型 qwen-vl-max
+        url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+        headers = {
+            "Authorization": f"Bearer {QWEN_API_KEY}",
+            "Content-Type": "application/json"
         }
-    }
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        result = resp.json()
-        # 通义千问返回格式
-        reply = result.get("output", {}).get("text")
-        if not reply:
-            # 兼容新版API返回格式
-            choices = result.get("output", {}).get("choices")
-            if choices and isinstance(choices, list):
-                reply = choices[0].get("message", {}).get("content")
-        if reply:
-            return {"code": 0, "data": {"reply": reply}}
+        
+        # 构建完整的图片URL（如果是相对路径，需要转换为绝对路径）
+        if image_url.startswith('/uploads/'):
+            # 如果是相对路径，需要根据实际情况构建完整URL
+            # 这里假设图片在服务器上可以直接访问
+            full_image_url = image_url
+        elif image_url.startswith('http'):
+            full_image_url = image_url
         else:
-            return {"code": 1, "msg": result.get("message", "通义千问API调用失败")}
-    except Exception as e:
-        return {"code": 1, "msg": f"通义千问API异常: {str(e)}"}
+            full_image_url = f"/uploads/{image_url}"
+        
+        # 如果没有提供问题，使用默认提示
+        if not user_message or user_message.strip() == "":
+            user_message = "请详细分析这张图片，包括图片中的内容、文字、场景等所有可见信息。"
+        
+        # 构建多模态消息
+        prompt = f"请用简体中文回答：{user_message}"
+        
+        # 读取图片并转换为base64
+        try:
+            image_base64 = None
+            # 尝试读取本地图片文件并转换为base64
+            if full_image_url.startswith('/uploads/'):
+                uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads')
+                # 处理assistant子目录的情况
+                if 'assistant' in full_image_url:
+                    image_path = os.path.join(uploads_dir, 'assistant', full_image_url.split('assistant/')[-1])
+                elif 'images' in full_image_url:
+                    image_path = os.path.join(uploads_dir, 'images', full_image_url.split('images/')[-1])
+                else:
+                    image_path = os.path.join(uploads_dir, full_image_url.replace('/uploads/', ''))
+                
+                if os.path.exists(image_path):
+                    with open(image_path, 'rb') as f:
+                        image_data = f.read()
+                        image_base64 = base64.b64encode(image_data).decode('utf-8')
+                else:
+                    return {"code": 1, "msg": f"图片文件不存在: {image_path}"}
+            elif full_image_url.startswith('http'):
+                # 如果是HTTP URL，尝试下载并转换为base64
+                try:
+                    resp = requests.get(full_image_url, timeout=10)
+                    if resp.status_code == 200:
+                        image_base64 = base64.b64encode(resp.content).decode('utf-8')
+                    else:
+                        return {"code": 1, "msg": f"无法下载图片: HTTP {resp.status_code}"}
+                except Exception as e:
+                    return {"code": 1, "msg": f"下载图片失败: {str(e)}"}
+            else:
+                return {"code": 1, "msg": "不支持的图片URL格式"}
+            
+            if not image_base64:
+                return {"code": 1, "msg": "无法获取图片数据"}
+            
+            # 使用通义千问多模态API (qwen-vl-plus 或 qwen-vl-max)
+            # 通义千问VL API使用messages格式，支持图片base64
+            payload = {
+                "model": "qwen-vl-plus",  # 使用qwen-vl-plus，如果API KEY支持qwen-vl-max可以改用
+                "input": {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "image": f"data:image/jpeg;base64,{image_base64}"
+                                },
+                                {
+                                    "text": prompt
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "parameters": {
+                    "result_format": "message"
+                }
+            }
+            
+            resp = requests.post(url, headers=headers, json=payload, timeout=60)
+            result = resp.json()
+            
+            # 解析返回结果 - 通义千问VL的返回格式
+            if "output" in result:
+                choices = result.get("output", {}).get("choices", [])
+                if choices and len(choices) > 0:
+                    message_content = choices[0].get("message", {}).get("content", "")
+                    if message_content:
+                        reply = message_content
+                    else:
+                        # 尝试其他格式
+                        reply = result.get("output", {}).get("text", "")
+                else:
+                    reply = result.get("output", {}).get("text", "")
+            else:
+                # 如果返回格式不同，尝试直接获取
+                reply = result.get("text", "") or result.get("message", {}).get("content", "")
+            
+            if reply:
+                # 确保reply是字符串
+                reply_str = str(reply) if reply else "图片分析完成，但未返回内容"
+                return {"code": 0, "data": {"reply": reply_str}}
+            else:
+                # 检查是否是账户问题
+                error_msg = result.get("message", "图片分析失败")
+                if "Access denied" in str(result) or "overdue" in str(result).lower() or "account" in str(result).lower():
+                    error_msg = "API账户异常，请检查账户状态和余额。如需更换API KEY，请设置环境变量 QWEN_API_KEY"
+                return {"code": 1, "msg": error_msg, "debug": result}
+                
+        except Exception as e:
+            # 如果多模态API失败，返回详细错误信息
+            import traceback
+            error_detail = traceback.format_exc()
+            return {"code": 1, "msg": f"图片分析异常: {str(e)}", "detail": error_detail}
+    else:
+        # 纯文本模式，使用原来的逻辑
+        url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
+        headers = {
+            "Authorization": f"Bearer {QWEN_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        # 强制中文回答
+        prompt = f"请用简体中文回答：{user_message}"
+        payload = {
+            "model": "qwen-turbo",
+            "input": {
+                "prompt": prompt
+            },
+            "parameters": {
+                "result_format": "message"
+            }
+        }
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=30)
+            result = resp.json()
+            # 通义千问返回格式
+            reply = result.get("output", {}).get("text")
+            if not reply:
+                # 兼容新版API返回格式
+                choices = result.get("output", {}).get("choices")
+                if choices and isinstance(choices, list):
+                    reply = choices[0].get("message", {}).get("content")
+            if reply:
+                return {"code": 0, "data": {"reply": reply}}
+            else:
+                # 检查是否是账户问题
+                error_msg = result.get("message", "通义千问API调用失败")
+                if "Access denied" in str(result) or "overdue" in str(result).lower() or "account" in str(result).lower():
+                    error_msg = "API账户异常，请检查账户状态和余额。如需更换API KEY，请设置环境变量 QWEN_API_KEY"
+                return {"code": 1, "msg": error_msg, "debug": result}
+        except Exception as e:
+            error_msg = str(e)
+            if "Access denied" in error_msg or "overdue" in error_msg.lower():
+                error_msg = "API账户异常，请检查账户状态和余额。如需更换API KEY，请设置环境变量 QWEN_API_KEY"
+            return {"code": 1, "msg": f"通义千问API异常: {error_msg}"}
 
 @app.get("/api/assistant/recommend")
 async def assistant_recommend(query: str = ""):
@@ -1470,15 +2546,62 @@ async def assistant_recommend(query: str = ""):
 
 @app.get("/api/schedule/today")
 async def schedule_today(payload: dict = Depends(verify_token)):
-    # 这里返回模拟数据，后续可接数据库
+    """获取今天的日程 - 只返回当前用户的数据"""
     try:
+        user_id = payload["userId"]
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        schedule_data = []
+        
+        # 获取今天的任务
+        async with SessionLocal() as session:
+            result = await session.execute(
+                select(TodayTask).where(
+                    TodayTask.user_id == user_id,
+                    TodayTask.date == today_str
+                )
+            )
+            tasks = result.scalars().all()
+            for task in tasks:
+                schedule_data.append({
+                    "id": f"task_{task.id}",
+                    "title": task.content,
+                    "time": task.time or "待定",
+                    "type": "task"
+                })
+        
+        # 获取今天的会议
+        async with MeetingSessionLocal() as session:
+            result = await session.execute(
+                select(Meeting).where(Meeting.time.like(f"{today_str}%"))
+            )
+            all_meetings = result.scalars().all()
+            
+            # 过滤出用户相关的会议
+            for meeting in all_meetings:
+                is_related = False
+                if meeting.user_id == user_id or meeting.host_user_id == user_id:
+                    is_related = True
+                elif meeting.participants:
+                    participant_ids = [int(pid.strip()) for pid in meeting.participants.split(",") if pid.strip().isdigit()]
+                    if user_id in participant_ids:
+                        is_related = True
+                
+                if is_related:
+                    # 提取时间部分
+                    meeting_time = meeting.time.split(' ')[1] if ' ' in meeting.time else meeting.time
+                    schedule_data.append({
+                        "id": f"meeting_{meeting.id}",
+                        "title": meeting.title,
+                        "time": meeting_time,
+                        "type": "meeting"
+                    })
+        
+        # 按时间排序
+        schedule_data.sort(key=lambda x: x.get("time", "00:00"))
+        
         return {
             "code": 0,
-            "data": [
-                {"id": 1, "title": "产品需求会议", "time": "09:30"},
-                {"id": 2, "title": "整理会议内容", "time": "15:30"},
-                {"id": 3, "title": "明天工作计划", "time": "18:30"}
-            ]
+            "data": schedule_data
         }
     except Exception as e:
         print(f"[schedule_today] 错误: {e}")
@@ -1542,7 +2665,7 @@ async def generate_new_avatar(payload: dict = Depends(verify_token)):
 async def upload_image(file: UploadFile = File(...), payload: dict = Depends(verify_token)):
     """上传图片接口，用于聊天发送图片"""
     if file.content_type not in ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"]:
-        raise HTTPException(status_code=400, detail="不支持的文件类型")
+        raise HTTPException(status_code=400, detail="不支持的文件类型，仅支持 JPEG、PNG、GIF、WebP、SVG 格式")
     
     user_id = payload.get("userId")
     if not user_id:
@@ -1550,7 +2673,7 @@ async def upload_image(file: UploadFile = File(...), payload: dict = Depends(ver
     
     # 文件大小限制 5MB
     if file.size and file.size > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="文件大小不能超过5MB")
+        raise HTTPException(status_code=400, detail="文件大小不能超过 5MB")
     
     # 创建目录
     uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads', 'images')
@@ -1568,6 +2691,116 @@ async def upload_image(file: UploadFile = File(...), payload: dict = Depends(ver
     
     return {"code": 0, "data": {"url": f"/uploads/images/{filename}"}}
 
+def extract_file_content(file_path: str, file_ext: str) -> str:
+    """提取文件内容，支持多种文件格式"""
+    content = ""
+    try:
+        ext = file_ext.lower()
+        
+        if ext == ".txt":
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+        
+        elif ext == ".docx":
+            try:
+                from docx import Document
+                doc = Document(file_path)
+                content = "\n".join([p.text for p in doc.paragraphs])
+            except ImportError:
+                content = "[错误: 需要安装python-docx库]"
+            except Exception as e:
+                content = f"[解析DOCX文件时出错: {str(e)}]"
+        
+        elif ext == ".doc":
+            # 处理旧版Word格式(.doc)
+            try:
+                # 尝试使用textract库（如果已安装）
+                import textract
+                content = textract.process(file_path).decode('utf-8')
+            except ImportError:
+                # 如果textract未安装，尝试使用pypandoc
+                try:
+                    import pypandoc
+                    content = pypandoc.convert_file(file_path, 'plain', format='doc')
+                except ImportError:
+                    # 如果都未安装，提示用户安装
+                    content = "[错误: 需要安装textract或pypandoc库来解析.doc文件。请运行: pip install textract 或 pip install pypandoc]"
+                except Exception as e:
+                    content = f"[解析DOC文件时出错: {str(e)}]"
+            except Exception as e:
+                content = f"[解析DOC文件时出错: {str(e)}]"
+        
+        elif ext == ".pdf":
+            try:
+                import PyPDF2
+                with open(file_path, 'rb') as f:
+                    pdf_reader = PyPDF2.PdfReader(f)
+                    pages_text = []
+                    for page_num in range(len(pdf_reader.pages)):
+                        page = pdf_reader.pages[page_num]
+                        pages_text.append(page.extract_text())
+                    content = "\n\n".join(pages_text)
+            except ImportError:
+                content = "[错误: 需要安装PyPDF2库]"
+            except Exception as e:
+                content = f"[解析PDF文件时出错: {str(e)}]"
+        
+        elif ext == ".pptx":
+            try:
+                from pptx import Presentation
+                prs = Presentation(file_path)
+                slides = []
+                for slide in prs.slides:
+                    slide_text = []
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text") and shape.text:
+                            slide_text.append(shape.text)
+                    if slide_text:
+                        slides.append("\n".join(slide_text))
+                content = "\n\n---幻灯片分隔---\n\n".join(slides)
+            except ImportError:
+                content = "[错误: 需要安装python-pptx库]"
+            except Exception as e:
+                content = f"[解析PPTX文件时出错: {str(e)}]"
+        
+        elif ext in [".xls", ".xlsx"]:
+            try:
+                import openpyxl
+                wb = openpyxl.load_workbook(file_path)
+                sheets_content = []
+                for sheet_name in wb.sheetnames:
+                    sheet = wb[sheet_name]
+                    rows = []
+                    for row in sheet.iter_rows(values_only=True):
+                        row_data = [str(cell) if cell is not None else "" for cell in row]
+                        rows.append("\t".join(row_data))
+                    sheets_content.append(f"工作表: {sheet_name}\n" + "\n".join(rows))
+                content = "\n\n---工作表分隔---\n\n".join(sheets_content)
+            except ImportError:
+                content = "[错误: 需要安装openpyxl库]"
+            except Exception as e:
+                content = f"[解析Excel文件时出错: {str(e)}]"
+        
+        elif ext == ".csv":
+            try:
+                import csv
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    reader = csv.reader(f)
+                    rows = []
+                    for row in reader:
+                        rows.append("\t".join(row))
+                    content = "\n".join(rows)
+            except Exception as e:
+                content = f"[解析CSV文件时出错: {str(e)}]"
+        
+        else:
+            content = f"[不支持的文件格式: {ext}]"
+    
+    except Exception as e:
+        content = f"[提取文件内容时出错: {str(e)}]"
+    
+    return content
+
 @app.post("/api/assistant/upload")
 async def assistant_upload_file(file: UploadFile = File(...), payload: dict = Depends(verify_token)):
     """智能助手上传接口，支持图片和附件"""
@@ -1578,15 +2811,31 @@ async def assistant_upload_file(file: UploadFile = File(...), payload: dict = De
     
     # 文件大小限制 10MB
     if file.size and file.size > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="文件大小不能超过10MB")
+        raise HTTPException(status_code=400, detail="文件大小不能超过 10MB")
     
-    # 检查文件类型
+    # 检查文件类型（根据文件扩展名和content_type）
+    file_ext = os.path.splitext(file.filename)[1].lower() if file.filename else ""
     file_type = "file"
-    if file.content_type:
+    
+    # 优先根据文件扩展名判断
+    if file_ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp"]:
+        file_type = "image"
+    elif file_ext in [".txt", ".md", ".log"]:
+        file_type = "text"
+    elif file_ext in [".doc", ".docx", ".pdf", ".ppt", ".pptx"]:
+        file_type = "document"
+    elif file_ext in [".xls", ".xlsx", ".csv"]:
+        file_type = "document"  # Excel文件也归类为document，可以分析
+    elif file_ext in [".zip", ".rar", ".tar", ".gz", ".7z"]:
+        file_type = "archive"
+    elif file.content_type:
+        # 如果扩展名无法判断，使用content_type
         if file.content_type.startswith("image/"):
             file_type = "image"
         elif file.content_type in ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]:
             file_type = "document"
+        elif file.content_type in ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv"]:
+            file_type = "document"  # Excel文件
         elif file.content_type in ["application/zip", "application/x-rar-compressed", "application/x-tar", "application/gzip"]:
             file_type = "archive"
         elif file.content_type.startswith("text/"):
@@ -1606,13 +2855,19 @@ async def assistant_upload_file(file: UploadFile = File(...), payload: dict = De
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
+    # 如果是文档类型，尝试提取内容
+    content = ""
+    if file_type in ["document", "text"]:
+        content = extract_file_content(file_path, file_ext)
+    
     return {
         "code": 0, 
         "data": {
             "url": f"/uploads/assistant/{filename}",
             "type": file_type,
             "original_name": file.filename,
-            "size": file.size or 0
+            "size": file.size or 0,
+            "content": content[:5000] if content else ""  # 返回前5000字符，用于预览
         }
     }
 
@@ -1627,24 +2882,56 @@ class TodayTaskModel(BaseModel):
 @app.get("/api/today-tasks")
 async def get_today_tasks(payload: dict = Depends(verify_token)):
     try:
+        user_id = payload["userId"]
         async with SessionLocal() as session:
-            result = await session.execute(select(TodayTask))
-            tasks = result.scalars().all()
-            tasks = [dict(id=t.id, content=t.content, time=t.time, completed=t.completed, date=t.date, type=getattr(t, "type", "bg-primary"), endDate=getattr(t, "end_date", "")) for t in tasks]
+            # 只查询当前用户的任务，处理 user_id 可能为 NULL 的情况
+            try:
+                result = await session.execute(
+                    select(TodayTask).where(
+                        (TodayTask.user_id == user_id) | (TodayTask.user_id.is_(None))
+                    )
+                )
+                tasks = result.scalars().all()
+                # 过滤掉 user_id 为 NULL 的任务（这些是旧数据，应该被迁移）
+                tasks = [t for t in tasks if t.user_id == user_id]
+                tasks = [dict(id=t.id, content=t.content, time=t.time, completed=t.completed, date=t.date, type=getattr(t, "type", "bg-primary"), endDate=getattr(t, "end_date", "")) for t in tasks]
+            except Exception as db_error:
+                # 如果查询失败，可能是字段不存在，尝试使用原始 SQL
+                print(f"[获取今日任务] ORM 查询失败，尝试使用原始 SQL 查询: {db_error}")
+                result = await session.execute(
+                    text("SELECT * FROM today_tasks WHERE user_id = :user_id"),
+                    {"user_id": user_id}
+                )
+                rows = result.fetchall()
+                tasks = []
+                for row in rows:
+                    tasks.append({
+                        "id": row[0],
+                        "content": row[2] if len(row) > 2 else "",
+                        "time": row[3] if len(row) > 3 else "待定",
+                        "completed": bool(row[4]) if len(row) > 4 else False,
+                        "date": row[5] if len(row) > 5 else "",
+                        "type": row[6] if len(row) > 6 else "bg-primary",
+                        "endDate": row[7] if len(row) > 7 else ""
+                    })
         return {"code": 0, "tasks": tasks}
     except Exception as e:
         print(f"[get_today_tasks] 错误: {e}")
-        return {"code": 1, "msg": "获取任务失败", "tasks": []}
+        import traceback
+        traceback.print_exc()
+        return {"code": 1, "msg": f"获取任务失败: {str(e)}", "tasks": []}
 
 @app.post("/api/today-tasks")
 async def add_today_task(task: TodayTaskModel, payload: dict = Depends(verify_token)):
     try:
+        user_id = payload["userId"]
         import datetime
         db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../users.db'))
         print(f"[add_today_task] 数据库绝对路径: {db_path}")
-        print(f"[add_today_task] 收到任务: {task}")
+        print(f"[add_today_task] 收到任务: {task}, 用户ID: {user_id}")
         async with SessionLocal() as session:
             new_task = TodayTask(
+                user_id=user_id,  # 添加用户ID
                 content=task.content,
                 time=task.time or datetime.datetime.now().strftime('%H:%M'),
                 completed=task.completed,
@@ -1664,13 +2951,15 @@ async def add_today_task(task: TodayTaskModel, payload: dict = Depends(verify_to
 @app.delete("/api/today-tasks/{task_id}")
 async def delete_today_task(task_id: int, payload: dict = Depends(verify_token)):
     try:
-        print(f"[delete_today_task] 请求删除任务ID: {task_id}")
+        user_id = payload["userId"]
+        print(f"[delete_today_task] 请求删除任务ID: {task_id}, 用户ID: {user_id}")
         async with SessionLocal() as session:
-            result = await session.execute(select(TodayTask).where(TodayTask.id == task_id))
+            # 只允许删除自己的任务
+            result = await session.execute(select(TodayTask).where(TodayTask.id == task_id, TodayTask.user_id == user_id))
             task = result.scalar_one_or_none()
             if not task:
-                print(f"[delete_today_task] 未找到任务: {task_id}")
-                return JSONResponse({"code": 1, "msg": "任务不存在"}, status_code=status.HTTP_404_NOT_FOUND)
+                print(f"[delete_today_task] 未找到任务或无权删除: {task_id}")
+                return JSONResponse({"code": 1, "msg": "任务不存在或无权限"}, status_code=status.HTTP_404_NOT_FOUND)
             await session.delete(task)
             await session.commit()
             print(f"[delete_today_task] 已删除任务: {task_id}")
@@ -1682,11 +2971,13 @@ async def delete_today_task(task_id: int, payload: dict = Depends(verify_token))
 @app.put("/api/today-tasks/{task_id}")
 async def update_today_task(task_id: int = Path(...), task: TodayTaskModel = Body(...), payload: dict = Depends(verify_token)):
     try:
+        user_id = payload["userId"]
         async with SessionLocal() as session:
-            result = await session.execute(select(TodayTask).where(TodayTask.id == task_id))
+            # 只允许更新自己的任务
+            result = await session.execute(select(TodayTask).where(TodayTask.id == task_id, TodayTask.user_id == user_id))
             db_task = result.scalar_one_or_none()
             if not db_task:
-                return JSONResponse({"code": 1, "msg": "任务不存在"}, status_code=status.HTTP_404_NOT_FOUND)
+                return JSONResponse({"code": 1, "msg": "任务不存在或无权限"}, status_code=status.HTTP_404_NOT_FOUND)
             db_task.content = task.content
             db_task.time = task.time
             db_task.completed = task.completed
@@ -1744,7 +3035,8 @@ async def ai_summary(data: dict = Body(...)):
     
     # 尝试使用通义千问API
     try:
-        api_key = "sk-751689471abb4aaf9d7169c86884b1a0"
+        # 从环境变量读取API KEY，如果没有则使用默认值
+        api_key = os.getenv("QWEN_API_KEY", "sk-751689471abb4aaf9d7169c86884b1a0")
         api_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -2045,15 +3337,27 @@ active_connections = {}
 async def websocket_endpoint(websocket: WebSocket, token: str):
     user_id = None
     try:
+        # 接受所有来源的连接（支持跨域）
+        await websocket.accept()
+        
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get("userId") or payload.get("sub")
         if not user_id:
             print(f"[WS] token解析失败，payload={payload}")
-            await websocket.close(code=1008)
+            await websocket.close(code=1008, reason="Invalid token")
             return
         user_id = int(user_id)
-        await websocket.accept()
+        print(f"[WS] 用户 {user_id} 连接成功，来源: {websocket.client}")
+        
+        # 如果该用户已有连接，关闭旧连接
+        if user_id in active_connections:
+            try:
+                await active_connections[user_id].close(code=1000, reason="New connection")
+            except Exception as e:
+                print(f"[WS] 关闭旧连接异常: {e}")
+        
         active_connections[user_id] = websocket
+        print(f"[WS] 当前活跃连接数: {len(active_connections)}")
         while True:
             try:
                 data = await websocket.receive_text()
@@ -2098,6 +3402,8 @@ async def send_message(data: dict = Body(...), payload: dict = Depends(verify_to
     to_user_id = data.get("to_user_id")
     content = data.get("content")
     msg_type = data.get("type", "text")
+    file_name = data.get("file_name")  # 文件名
+    file_size = data.get("file_size")  # 文件大小
     
     if not to_user_id or not content:
         return {"code": 1, "msg": "缺少必要参数"}
@@ -2109,6 +3415,13 @@ async def send_message(data: dict = Body(...), payload: dict = Depends(verify_to
         "type": msg_type,
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
+    
+    # 如果是文件类型，添加文件元数据
+    if msg_type == "file":
+        if file_name:
+            msg_obj["file_name"] = file_name
+        if file_size is not None:
+            msg_obj["file_size"] = file_size
     
     try:
         save_message_to_json(msg_obj)
@@ -2188,10 +3501,10 @@ def save_message_to_json(msg_obj):
     import os
     db_path = os.path.join(os.path.dirname(__file__), "chat-db.json")
     if not isinstance(msg_obj, dict):
-        raise ValueError("msg_obj 不是 dict")
+        raise ValueError("消息对象必须是字典类型")
     for k in ["from_user_id", "to_user_id", "content", "time"]:
         if k not in msg_obj:
-            raise ValueError(f"msg_obj 缺少字段: {k}")
+            raise ValueError(f"消息对象缺少必要字段: {k}")
     
     # 为消息添加id和is_read字段
     msg_obj["id"] = int(datetime.now().timestamp() * 1000)  # 使用时间戳作为ID
@@ -2237,71 +3550,300 @@ async def get_users_list(payload: dict = Depends(verify_token)):
         
         return {"code": 0, "data": user_list}
 
+# ========== 人事部人员管理接口 ==========
+@app.get("/api/personnel/list")
+async def get_personnel_list(
+    page: int = 1,
+    pageSize: int = 20,
+    department: str = None,
+    keyword: str = None,
+    payload: dict = Depends(verify_token)
+):
+    """获取人员列表（支持分页、部门筛选、关键词搜索）"""
+    try:
+        current_user_id = payload["userId"]
+        # 检查当前用户是否是人事部
+        async with SessionLocal() as session:
+            result = await session.execute(select(User).where(User.id == current_user_id))
+            current_user = result.scalar_one_or_none()
+            if not current_user or current_user.department != "人事部":
+                return {"code": 1, "msg": "无权限访问，仅人事部可查看", "data": {"list": [], "total": 0}}
+            
+            # 构建查询
+            query = select(User)
+            
+            # 部门筛选
+            if department and department.strip():
+                query = query.where(User.department == department.strip())
+            
+            # 关键词搜索（姓名、用户名、联系方式）
+            if keyword and keyword.strip():
+                keyword_lower = keyword.strip().lower()
+                query = query.where(
+                    or_(
+                        User.real_name.like(f"%{keyword_lower}%"),
+                        User.username.like(f"%{keyword_lower}%"),
+                        User.contact.like(f"%{keyword_lower}%"),
+                        User.nick_name.like(f"%{keyword_lower}%")
+                    )
+                )
+            
+            # 执行查询
+            result = await session.execute(query)
+            all_users = result.scalars().all()
+            
+            # 分页处理
+            total = len(all_users)
+            start = (page - 1) * pageSize
+            end = start + pageSize
+            paginated_users = all_users[start:end]
+            
+            # 格式化返回数据
+            user_list = []
+            for user in paginated_users:
+                user_list.append({
+                    "id": user.id,
+                    "username": user.username,
+                    "realName": user.real_name or "",
+                    "nickName": user.nick_name or "",
+                    "department": user.department or "",
+                    "avatar": user.avatar or "",
+                    "contact": user.contact or "",
+                    "theme": user.theme or "auto",
+                    "language": user.language or "zh"
+                })
+            
+            return {"code": 0, "data": {"list": user_list, "total": total}}
+    except Exception as e:
+        print(f"[get_personnel_list] 错误: {e}")
+        return {"code": 1, "msg": f"获取人员列表失败: {str(e)}", "data": {"list": [], "total": 0}}
+
+@app.post("/api/personnel/create")
+async def create_personnel(data: dict = Body(...), payload: dict = Depends(verify_token)):
+    """创建新人员"""
+    try:
+        current_user_id = payload["userId"]
+        async with SessionLocal() as session:
+            # 检查权限
+            result = await session.execute(select(User).where(User.id == current_user_id))
+            current_user = result.scalar_one_or_none()
+            if not current_user or current_user.department != "人事部":
+                return {"code": 1, "msg": "无权限，仅人事部可创建人员"}
+            
+            # 验证必填字段
+            username = data.get("username", "").strip()
+            contact = data.get("contact", "").strip()
+            password = data.get("password", "").strip()
+            
+            if not username:
+                return {"code": 1, "msg": "用户名不能为空"}
+            if not contact:
+                return {"code": 1, "msg": "联系方式不能为空"}
+            if not password:
+                return {"code": 1, "msg": "密码不能为空"}
+            
+            # 检查用户名是否已存在
+            result = await session.execute(select(User).where(User.username == username))
+            if result.scalar_one_or_none():
+                return {"code": 1, "msg": "用户名已存在"}
+            
+            # 检查联系方式是否已存在
+            result = await session.execute(select(User).where(User.contact == contact))
+            if result.scalar_one_or_none():
+                return {"code": 1, "msg": "联系方式已存在"}
+            
+            # 创建新用户
+            hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+            new_user = User(
+                username=username,
+                password=hashed_password,
+                contact=contact,
+                real_name=data.get("realName", "").strip(),
+                nick_name=data.get("nickName", "").strip(),
+                department=data.get("department", "").strip(),
+                avatar=data.get("avatar", ""),
+                theme=data.get("theme", "auto"),
+                language=data.get("language", "zh")
+            )
+            session.add(new_user)
+            await session.commit()
+            await session.refresh(new_user)
+            
+            return {"code": 0, "msg": "创建成功", "data": {"id": new_user.id}}
+    except Exception as e:
+        print(f"[create_personnel] 错误: {e}")
+        return {"code": 1, "msg": f"创建失败: {str(e)}"}
+
+@app.post("/api/personnel/update")
+async def update_personnel(data: dict = Body(...), payload: dict = Depends(verify_token)):
+    """更新人员信息"""
+    try:
+        current_user_id = payload["userId"]
+        user_id = data.get("id")
+        if not user_id:
+            return {"code": 1, "msg": "用户ID不能为空"}
+        
+        async with SessionLocal() as session:
+            # 检查权限
+            result = await session.execute(select(User).where(User.id == current_user_id))
+            current_user = result.scalar_one_or_none()
+            if not current_user or current_user.department != "人事部":
+                return {"code": 1, "msg": "无权限，仅人事部可更新人员信息"}
+            
+            # 查找要更新的用户
+            result = await session.execute(select(User).where(User.id == user_id))
+            user = result.scalar_one_or_none()
+            if not user:
+                return {"code": 1, "msg": "用户不存在"}
+            
+            # 更新字段
+            if "username" in data:
+                new_username = data["username"].strip()
+                if new_username and new_username != user.username:
+                    # 检查新用户名是否已存在
+                    result = await session.execute(select(User).where(User.username == new_username))
+                    if result.scalar_one_or_none():
+                        return {"code": 1, "msg": "用户名已存在"}
+                    user.username = new_username
+            
+            if "contact" in data:
+                new_contact = data["contact"].strip()
+                if new_contact and new_contact != user.contact:
+                    # 检查新联系方式是否已存在
+                    result = await session.execute(select(User).where(User.contact == new_contact))
+                    if result.scalar_one_or_none():
+                        return {"code": 1, "msg": "联系方式已存在"}
+                    user.contact = new_contact
+            
+            if "realName" in data:
+                user.real_name = data["realName"].strip()
+            if "nickName" in data:
+                user.nick_name = data["nickName"].strip()
+            if "department" in data:
+                user.department = data["department"].strip()
+            if "avatar" in data:
+                user.avatar = data["avatar"]
+            if "theme" in data:
+                user.theme = data["theme"]
+            if "language" in data:
+                user.language = data["language"]
+            
+            # 如果提供了新密码，更新密码
+            if "password" in data and data["password"]:
+                hashed_password = bcrypt.hashpw(data["password"].encode(), bcrypt.gensalt()).decode()
+                user.password = hashed_password
+            
+            await session.commit()
+            return {"code": 0, "msg": "更新成功"}
+    except Exception as e:
+        print(f"[update_personnel] 错误: {e}")
+        return {"code": 1, "msg": f"更新失败: {str(e)}"}
+
+@app.post("/api/personnel/delete")
+async def delete_personnel(data: dict = Body(...), payload: dict = Depends(verify_token)):
+    """删除人员"""
+    try:
+        current_user_id = payload["userId"]
+        user_id = data.get("id")
+        if not user_id:
+            return {"code": 1, "msg": "用户ID不能为空"}
+        
+        if int(user_id) == int(current_user_id):
+            return {"code": 1, "msg": "不能删除自己"}
+        
+        async with SessionLocal() as session:
+            # 检查权限
+            result = await session.execute(select(User).where(User.id == current_user_id))
+            current_user = result.scalar_one_or_none()
+            if not current_user or current_user.department != "人事部":
+                return {"code": 1, "msg": "无权限，仅人事部可删除人员"}
+            
+            # 查找要删除的用户
+            result = await session.execute(select(User).where(User.id == user_id))
+            user = result.scalar_one_or_none()
+            if not user:
+                return {"code": 1, "msg": "用户不存在"}
+            
+            await session.delete(user)
+            await session.commit()
+            return {"code": 0, "msg": "删除成功"}
+    except Exception as e:
+        print(f"[delete_personnel] 错误: {e}")
+        return {"code": 1, "msg": f"删除失败: {str(e)}"}
+
 @app.get("/api/dashboard/stats")
 async def get_dashboard_stats(payload: dict = Depends(verify_token)):
-    """获取工作台统计数据"""
+    """获取工作台统计数据 - 只统计当前用户的数据"""
     try:
-        # 获取文档统计
+        user_id = payload["userId"]
+        
+        # 获取文档统计 - 只统计当前用户的文档
         doc_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'uploads', 'doc.json')
         doc_total = 0
         if os.path.exists(doc_path):
             try:
                 with open(doc_path, 'r', encoding='utf-8') as f:
                     docs = json.load(f)
-                    doc_total = len(docs)
+                    # 只统计当前用户的文档
+                    doc_total = len([doc for doc in docs if doc.get("userId") == user_id])
             except:
                 doc_total = 0
         
-        # 获取用户统计
+        # 获取任务统计 - 只统计当前用户的任务
         async with SessionLocal() as session:
-            result = await session.execute(select(User))
-            users = result.scalars().all()
-            total_users = len(users)
+            result = await session.execute(select(func.count(TodayTask.id)).where(TodayTask.user_id == user_id))
+            task_total = result.scalar() or 0
             
-            # 获取今天的会议数量
+            # 获取今天的会议数量 - 只统计当前用户相关的会议
             today_str = datetime.now().strftime('%Y-%m-%d')
-            result = await session.execute(
-                select(func.count(Meeting.id)).where(
-                    Meeting.time.like(f"{today_str}%")
-                )
+            async with MeetingSessionLocal() as meeting_session:
+                # 查询所有今天的会议
+                result = await meeting_session.execute(
+                    select(Meeting).where(Meeting.time.like(f"{today_str}%"))
             )
-            today_meetings = result.scalar() or 0
+                all_today_meetings = result.scalars().all()
+                
+                # 过滤出用户相关的会议
+                user_today_meetings = []
+                for meeting in all_today_meetings:
+                    is_related = False
+                    if meeting.user_id == user_id or meeting.host_user_id == user_id:
+                        is_related = True
+                    elif meeting.participants:
+                        participant_ids = [int(pid.strip()) for pid in meeting.participants.split(",") if pid.strip().isdigit()]
+                        if user_id in participant_ids:
+                            is_related = True
+                    if is_related:
+                        user_today_meetings.append(meeting)
+                
+                today_meetings = len(user_today_meetings)
             
             # 获取即将开始的会议（今天且未来时间）
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
-            result = await session.execute(
-                select(func.count(Meeting.id)).where(
-                    Meeting.time >= current_time,
-                    Meeting.time.like(f"{today_str}%")
-                )
-            )
-            upcoming_meetings = result.scalar() or 0
-            
-            # 获取已完成会议（今天且过去时间）
-            result = await session.execute(
-                select(func.count(Meeting.id)).where(
-                    Meeting.time < current_time,
-                    Meeting.time.like(f"{today_str}%")
-                )
-            )
-            completed_meetings = result.scalar() or 0
+            upcoming_meetings = 0
+            completed_meetings = 0
+            for meeting in user_today_meetings:
+                if meeting.time >= current_time:
+                    upcoming_meetings += 1
+                else:
+                    completed_meetings += 1
         
-        # 生成基于真实数据的统计
-        base_visits = 5000
-        base_views = 4500
+        # 生成基于真实数据的统计 - 只统计当前用户的数据
+        base_visits = 1000
+        base_views = 800
         
         stats = {
             "cardStats": [
                 {
                     "des": "总访问次数",
                     "icon": "&#xe721;",
-                    "num": base_visits + (total_users * 150) + (doc_total * 25),
+                    "num": base_visits + (doc_total * 25) + (task_total * 10),
                     "change": "+15%"
                 },
                 {
-                    "des": "在线访客数",
+                    "des": "我的任务",
                     "icon": "&#xe724;",
-                    "num": min(total_users * 3, 300),
+                    "num": task_total,
                     "change": "+8%"
                 },
                 {
@@ -2311,9 +3853,9 @@ async def get_dashboard_stats(payload: dict = Depends(verify_token)):
                     "change": "-5%"
                 },
                 {
-                    "des": "新用户",
+                    "des": "我的文档",
                     "icon": "&#xe82a;",
-                    "num": max(total_users - 5, 0),
+                    "num": doc_total,
                     "change": "+25%"
                 }
             ],
@@ -2819,7 +4361,8 @@ async def download_recording(recording_id: int, payload: dict = Depends(verify_t
         print(f"下载录音文件失败: {e}")
         return {"code": 1, "msg": f"下载录音文件失败: {str(e)}"}
 
-# 注册路由
+# ========== 路由注册 ==========
+# 注册各个功能模块的路由
 app.include_router(search.router, prefix="/api")
 app.include_router(contact.router, prefix="/api")  
 app.include_router(group.router, prefix="/api")
@@ -2827,39 +4370,10 @@ app.include_router(message.router, prefix="/api")
 app.include_router(assistant_upload.router, prefix="/api/assistant")
 
 # 添加静态文件服务支持
-app.mount("/uploads", StaticFiles(directory="backend/uploads"), name="uploads")
+uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
+# ========== 应用启动 ==========
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=3007)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

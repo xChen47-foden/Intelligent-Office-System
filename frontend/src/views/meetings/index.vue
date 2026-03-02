@@ -17,6 +17,7 @@
       >
         <el-option label="全部" value="" />
         <el-option label="待召开" value="upcoming" />
+        <el-option label="正在召开中" value="ongoing" />
         <el-option label="已结束" value="finished" />
         <el-option label="已取消" value="canceled" />
       </el-select>
@@ -59,9 +60,9 @@
           <el-table-column label="操作" width="200">
             <template #default="scope">
               <el-button type="text" size="small" @click="viewDetail(scope.row)">详情</el-button>
-              <el-button v-if="canEdit && scope.row.status === 'upcoming'" type="text" size="small" @click="handleEditMeeting(scope.row)">编辑</el-button>
+              <el-button v-if="canEdit && (scope.row.status === 'upcoming' || scope.row.status === 'ongoing')" type="text" size="small" @click="handleEditMeeting(scope.row)">编辑</el-button>
               <el-button v-if="canDelete" type="text" size="small" @click="handleDeleteMeeting(scope.row)">删除</el-button>
-              <el-button v-if="scope.row.status === 'upcoming'" type="text" size="small" @click="startMeetingRecording(scope.row)">开始录音</el-button>
+              <el-button v-if="scope.row.status === 'upcoming' || scope.row.status === 'ongoing'" type="text" size="small" @click="startMeetingRecording(scope.row)">开始录音</el-button>
               <el-button v-if="scope.row.status === 'finished'" type="text" size="small" @click="showMinutesDialog(scope.row)">生成纪要</el-button>
             </template>
           </el-table-column>
@@ -125,6 +126,7 @@
         <el-form-item label="状态">
           <el-select v-model="detailForm.status" :disabled="!editingDetail">
             <el-option label="待召开" value="upcoming" />
+            <el-option label="正在召开中" value="ongoing" />
             <el-option label="已结束" value="finished" />
             <el-option label="已取消" value="canceled" />
           </el-select>
@@ -346,7 +348,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fetchMeetings, createMeeting, editMeeting as apiEditMeeting, deleteMeeting as apiDeleteMeeting, uploadAttachment, generateMinutesAI, approveMeetingApi, exportMeetings, notifyMeetingApi, fetchApprovalHistory, checkMeetingConflict, fetchRooms, fetchUsers } from '@/api/meetings'
 import dayjs from 'dayjs'
@@ -431,12 +433,14 @@ const batchExport = async () => {
 }
 const statusText = (status: string) => {
   if (status === 'upcoming') return '待召开'
+  if (status === 'ongoing') return '正在召开中'
   if (status === 'finished') return '已结束'
   if (status === 'canceled') return '已取消'
   return status
 }
 const statusTagType = (status: string) => {
   if (status === 'upcoming') return 'success'
+  if (status === 'ongoing') return 'warning'
   if (status === 'finished') return 'info'
   if (status === 'canceled') return 'danger'
   return 'info'
@@ -451,24 +455,32 @@ const approvalHistory = ref<any[]>([])
 const fetchAttachments = async (meetingId: number) => {
   try {
     const res: any = await api.get({ url: `/api/meetings/${meetingId}/attachments` })
-    if (Array.isArray(res.data)) {
-      attachments.value = res.data
-    } else if (Array.isArray(res)) {
+    // 后端直接返回数组，api.get 返回的是 res.data，所以 res 就是数组
+    if (Array.isArray(res)) {
       attachments.value = res
+    } else if (res && Array.isArray(res.data)) {
+      attachments.value = res.data
     } else {
       attachments.value = []
     }
   } catch (e) {
+    console.error('获取附件失败:', e)
     attachments.value = []
   }
 }
 
 const viewDetail = async (row: any) => {
   detailDialogTitle.value = '会议详情'
+  // 清空之前的附件数据
+  attachments.value = []
   detailForm.value = { 
     ...row,
     participants: row.participants 
-      ? (Array.isArray(row.participants) ? row.participants : row.participants.split(',').map((p: string) => p.trim()).filter(Boolean))
+      ? (Array.isArray(row.participants) ? row.participants : row.participants.split(',').map((p: string) => p.trim()).filter(Boolean).map((p: string) => {
+          // 如果是数字字符串，转换为数字；否则保持原样
+          const num = parseInt(p, 10)
+          return isNaN(num) ? p : num
+        }))
       : []
   }
   editingDetail.value = false
@@ -478,21 +490,44 @@ const viewDetail = async (row: any) => {
 }
 const handleEditMeeting = async (row: any) => {
   detailDialogTitle.value = '编辑会议'
-  detailForm.value = { ...row }
+  // 清空之前的附件数据
+  attachments.value = []
+  detailForm.value = { 
+    ...row,
+    participants: row.participants 
+      ? (Array.isArray(row.participants) ? row.participants : row.participants.split(',').map((p: string) => p.trim()).filter(Boolean).map((p: string) => {
+          // 如果是数字字符串，转换为数字；否则保持原样
+          const num = parseInt(p, 10)
+          return isNaN(num) ? p : num
+        }))
+      : []
+  }
   editingDetail.value = true
   detailDialogVisible.value = true
   await fetchAttachments(row.id)
 }
 const saveDetail = async () => {
-  await apiEditMeeting(detailForm.value)
+  // 确保 participants 是数组格式
+  const saveData = {
+    ...detailForm.value,
+    participants: Array.isArray(detailForm.value.participants) 
+      ? detailForm.value.participants 
+      : (detailForm.value.participants 
+          ? detailForm.value.participants.split(',').map((p: string) => p.trim()).filter(Boolean)
+          : [])
+  }
+  await apiEditMeeting(saveData)
   ElMessage.success('保存成功')
+  editingDetail.value = false
   detailDialogVisible.value = false
-  loadMeetings()
+  // 触发会议更新事件，通知其他页面刷新（事件监听器会自动调用loadMeetings）
+  eventEmitter.emit(MEETING_EVENTS.MEETING_UPDATED, saveData)
 }
 const handleDeleteMeeting = async (row: any) => {
   await apiDeleteMeeting(row.id)
   ElMessage.success('删除成功')
-  loadMeetings()
+  // 触发会议删除事件，通知其他页面刷新（事件监听器会自动调用loadMeetings）
+  eventEmitter.emit(MEETING_EVENTS.MEETING_DELETED, { id: row.id })
 }
 // 新建会议
 const showCreateDialog = ref(false)
@@ -517,7 +552,8 @@ const saveCreate = async () => {
   const res = await createMeeting(payload)
   ElMessage.success('新建成功')
   showCreateDialog.value = false
-  loadMeetings()
+  // 触发会议创建事件，通知其他页面刷新（事件监听器会自动调用loadMeetings）
+  eventEmitter.emit(MEETING_EVENTS.MEETING_CREATED, { ...payload, id: res.meetingId || res.id })
   // 新建会议成功后上传附件
   if (res && res.code === 0 && res.meetingId && createAttachments.length) {
     for (const file of createAttachments) {
@@ -565,20 +601,85 @@ const notifyMeeting = async (m: any) => {
   ElMessage.success('已通知参会人')
 }
 
-const loadMeetings = async () => {
+// 检查并更新会议状态
+const checkAndUpdateMeetingStatus = async (meeting: any): Promise<boolean> => {
+  if (!meeting.time || meeting.status === 'finished' || meeting.status === 'canceled') {
+    return false // 跳过没有时间或已结束/已取消的会议
+  }
+  
+  const now = new Date()
+  const meetingTime = new Date(meeting.time)
+  let newStatus: string | null = null
+  
+  // 如果会议时间已过（超过1小时），更新为"已结束"
+  if (meetingTime.getTime() + 60 * 60 * 1000 < now.getTime()) {
+    if (meeting.status !== 'finished') {
+      newStatus = 'finished'
+    }
+  }
+  // 如果会议正在进行中（时间已到但未超过1小时），更新为"正在召开中"
+  else if (meetingTime.getTime() <= now.getTime() && meetingTime.getTime() + 60 * 60 * 1000 >= now.getTime()) {
+    if (meeting.status !== 'ongoing') {
+      newStatus = 'ongoing'
+    }
+  }
+  
+  // 如果需要更新状态
+  if (newStatus) {
+    try {
+      await apiEditMeeting({ ...meeting, status: newStatus })
+      // 更新本地对象的状态
+      meeting.status = newStatus
+      console.log(`会议 ${meeting.id} 状态已更新为"${newStatus === 'finished' ? '已结束' : '正在召开中'}"`)
+      return true // 返回true表示状态已更新
+    } catch (error) {
+      console.error(`更新会议 ${meeting.id} 状态失败:`, error)
+      return false
+    }
+  }
+  
+  return false // 状态未更新
+}
+
+const loadMeetings = async (skipStatusCheck = false) => {
   loading.value = true
   try {
-    const params = {
-      kw: searchText.value,
-      status: selectedStatus.value,
+    const params: any = {
       page: currentPage.value,
       pageSize
+    }
+    // 只有在有搜索关键词时才传递
+    if (searchText.value && searchText.value.trim()) {
+      params.kw = searchText.value.trim()
+    }
+    // 只有在选择了状态时才传递状态参数
+    if (selectedStatus.value && selectedStatus.value.trim()) {
+      params.status = selectedStatus.value
     }
     console.log('[会议列表] 请求参数:', params)
     const res = await fetchMeetings(params)
     console.log('[会议列表] API响应:', res)
     allMeetings.value = res.data.list || []
     console.log('[会议列表] 设置的数据:', allMeetings.value)
+    
+    // 检查并更新会议状态（只在首次加载时检查，避免递归）
+    if (!skipStatusCheck) {
+      let hasUpdate = false
+      for (const meeting of allMeetings.value) {
+        const updated = await checkAndUpdateMeetingStatus(meeting)
+        if (updated) {
+          hasUpdate = true
+        }
+      }
+      // 如果状态有更新，重新加载会议列表（跳过状态检查，避免无限循环）
+      if (hasUpdate) {
+        // 延迟一下再重新加载，避免频繁请求
+        setTimeout(async () => {
+          await loadMeetings(true)
+        }, 500)
+        return
+      }
+    }
   } catch (error) {
     console.error('[会议列表] 加载会议数据失败:', error)
     allMeetings.value = []
@@ -586,10 +687,74 @@ const loadMeetings = async () => {
     loading.value = false
   }
 }
-watch([searchText, selectedStatus, currentPage], loadMeetings)
+// 使用防抖，避免频繁请求
+let loadMeetingsTimer: number | null = null
+watch([searchText, selectedStatus, currentPage], () => {
+  if (loadMeetingsTimer) {
+    clearTimeout(loadMeetingsTimer)
+  }
+  loadMeetingsTimer = window.setTimeout(() => {
+    loadMeetings(true) // 跳过状态检查，避免触发循环
+  }, 300)
+})
+
+// 监听对话框关闭，清空附件数据
+watch(detailDialogVisible, (newVal) => {
+  if (!newVal) {
+    // 对话框关闭时清空附件和编辑状态
+    attachments.value = []
+    editingDetail.value = false
+  }
+})
+
+// 定时检查会议状态
+let statusCheckInterval: number | null = null
+
+// 监听会议数据变更事件
 onMounted(() => {
   loadMeetings()
   loadUsers()
+  
+  // 监听会议创建、更新、删除事件
+  eventEmitter.on(MEETING_EVENTS.MEETING_CREATED, loadMeetings)
+  eventEmitter.on(MEETING_EVENTS.MEETING_UPDATED, loadMeetings)
+  eventEmitter.on(MEETING_EVENTS.MEETING_DELETED, loadMeetings)
+  
+  // 每5分钟检查一次会议状态（只在页面可见时检查）
+  statusCheckInterval = window.setInterval(async () => {
+    // 如果页面不可见，跳过检查
+    if (document.hidden) {
+      return
+    }
+    
+    if (allMeetings.value.length > 0) {
+      let hasUpdate = false
+      for (const meeting of allMeetings.value) {
+        const updated = await checkAndUpdateMeetingStatus(meeting)
+        if (updated) {
+          hasUpdate = true
+        }
+      }
+      // 如果状态有更新，重新加载会议列表（跳过状态检查，避免无限循环）
+      if (hasUpdate) {
+        // 延迟一下再重新加载，避免频繁请求
+        setTimeout(async () => {
+          await loadMeetings(true)
+        }, 500)
+      }
+    }
+  }, 5 * 60 * 1000) // 5分钟
+})
+
+// 组件卸载时清理事件监听和定时器
+onUnmounted(() => {
+  eventEmitter.off(MEETING_EVENTS.MEETING_CREATED, loadMeetings)
+  eventEmitter.off(MEETING_EVENTS.MEETING_UPDATED, loadMeetings)
+  eventEmitter.off(MEETING_EVENTS.MEETING_DELETED, loadMeetings)
+  if (statusCheckInterval !== null) {
+    clearInterval(statusCheckInterval)
+    statusCheckInterval = null
+  }
 })
 
 const uploadDialogVisible = ref(false)
@@ -619,7 +784,8 @@ const approveMeeting = async (action: 'approve' | 'reject') => {
   await approveMeetingApi(detailForm.value.id, action)
   ElMessage.success(action === 'approve' ? '审批通过' : '已驳回')
   detailDialogVisible.value = false
-  loadMeetings()
+  // 触发会议更新事件，通知其他页面刷新（事件监听器会自动调用loadMeetings）
+  eventEmitter.emit(MEETING_EVENTS.MEETING_UPDATED, detailForm.value)
 }
 
 // 附件删除功能
@@ -718,7 +884,7 @@ const updateMeetingStatus = async (meetingId: number, status: string) => {
   try {
     // 调用API更新会议状态
     // await updateMeetingStatusApi(meetingId, status)
-    loadMeetings() // 刷新会议列表
+    // 不需要手动刷新，状态检查会自动处理
   } catch (error) {
     console.error('更新会议状态失败:', error)
   }

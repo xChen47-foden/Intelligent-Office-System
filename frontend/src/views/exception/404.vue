@@ -3,6 +3,7 @@
 </template>
 
 <script setup lang="ts">
+  import { reactive } from 'vue'
   import imgUrl from '@imgs/state/404.png'
   const data = reactive({
     title: '404',

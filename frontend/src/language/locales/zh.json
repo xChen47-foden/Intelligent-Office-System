@@ -23,6 +23,12 @@
     "system": {
       "title": "系统管理",
       "userCenter": "个人中心"
+    },
+    "forgetPassword": {
+      "title": "忘记密码"
+    },
+    "login": {
+      "title": "登录"
     }
   },
   "common": {
@@ -47,9 +53,16 @@
     "account": "账号",
     "password": "密码",
     "department": "部门",
-    "placeholder": ["请输入账号", "请输入密码"],
+    "placeholder": ["请输入账号", "请输入密码", "请向右滑动完成验证"],
     "success": { "title": "登录成功", "message": "欢迎回来" },
     "sliderSuccessText": "验证通过"
+  },
+  "forgetPassword": {
+    "title": "忘记密码",
+    "subTitle": "请输入您的邮箱，我们将发送验证码到您的邮箱",
+    "placeholder": "请输入邮箱",
+    "submitBtnText": "重置密码",
+    "backBtnText": "返回登录"
   },
   "register": {
     "title": "注册新账号",

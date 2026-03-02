@@ -54,7 +54,7 @@ export const asyncRoutes: MenuListType[] = [
         name: 'SmartSchedule',
         path: 'smart-schedule',
         component: 'smart-schedule/index',
-        meta: { title: '智能会议',  keepAlive: true, icon: 'el-icon-date' }
+        meta: { title: '智能日程',  keepAlive: true, icon: 'el-icon-date' }
       },
       {
         id: 11,
@@ -80,6 +80,17 @@ export const asyncRoutes: MenuListType[] = [
           keepAlive: true,
           icon: 'el-icon-user'
         }
+      },
+      {
+        id: 14,
+        name: 'Personnel',
+        path: 'system/personnel',
+        component: 'system/Personnel',
+        meta: {
+          title: '人员管理',
+          keepAlive: true,
+          icon: 'el-icon-user-solid'
+        }
       }
     ]
   },
@@ -102,6 +113,17 @@ export const asyncRoutes: MenuListType[] = [
         component: RoutesAlias.User,
         meta: {
           title: 'menus.system.user',
+          keepAlive: true,
+          roles: ['R_SUPER', 'R_ADMIN']
+        }
+      },
+      {
+        id: 45,
+        path: 'personnel',
+        name: 'Personnel',
+        component: RoutesAlias.Personnel,
+        meta: {
+          title: '人员管理',
           keepAlive: true,
           roles: ['R_SUPER', 'R_ADMIN']
         }

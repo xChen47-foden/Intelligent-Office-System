@@ -35,14 +35,20 @@
       <div class="right-section">
         <div class="section-block">
           <div class="section-header">
-            <h3>今日任务</h3>
-            <el-button type="primary" size="small" @click="goToWorkbench">
-              <el-icon><Back /></el-icon>
-              返回工作台
-            </el-button>
+            <h3>{{ selectedDateTitle }}</h3>
+            <div class="header-actions">
+              <el-button type="primary" size="small" @click="handleAddTask">
+                <el-icon><Plus /></el-icon>
+                添加任务
+              </el-button>
+              <el-button type="primary" size="small" @click="goToWorkbench">
+                <el-icon><Back /></el-icon>
+                返回工作台
+              </el-button>
+            </div>
           </div>
           <ul class="task-list">
-            <li v-if="todayTasks.length === 0" class="task-item no-task" style="color: #aaa; text-align: center; width: 100%;">今日暂无任务</li>
+            <li v-if="todayTasks.length === 0" class="task-item no-task" style="color: #aaa; text-align: center; width: 100%;">{{ selectedDateEmptyText }}</li>
             <li v-for="(task, idx) in todayTasks" :key="task.id" class="task-item">
               <el-checkbox v-model="task.completed" @change="() => handleCheckTask(task)" />
               <span
@@ -63,7 +69,7 @@
           </ul>
         </div>
         <div class="section-block">
-          <h3>智能添加会议</h3>
+          <h3>智能添加任务</h3>
           <el-input
             v-model="smartInput"
             placeholder="如：明天下午3点开会，或粘贴会议/任务描述..."
@@ -88,14 +94,22 @@
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="500px" @closed="resetForm">
       <el-form :model="eventForm" label-width="80px">
         <el-form-item label="标题" required>
-          <el-input v-model="eventForm.content" placeholder="请输入会议标题" />
+          <el-input v-model="eventForm.content" placeholder="请输入任务名称" />
         </el-form-item>
         <el-form-item label="类型">
           <el-radio-group v-model="eventForm.type">
-            <el-radio label="bg-primary">普通</el-radio>
-            <el-radio label="bg-success">重要</el-radio>
-            <el-radio label="bg-warning">提醒</el-radio>
-            <el-radio label="bg-danger">紧急</el-radio>
+            <el-radio label="bg-primary">
+              <span class="radio-label">普通</span>
+            </el-radio>
+            <el-radio label="bg-success">
+              <span class="radio-label">重要</span>
+            </el-radio>
+            <el-radio label="bg-warning">
+              <span class="radio-label radio-warning">提醒</span>
+            </el-radio>
+            <el-radio label="bg-danger">
+              <span class="radio-label radio-danger">紧急</span>
+            </el-radio>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="日期" required>
@@ -144,17 +158,21 @@
 </template>
 
 <script setup lang="ts">
+// 智能日程管理页面 - 提供日历视图、任务管理、智能识别等功能
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { fetchMeetings } from '@/api/meetings'
 import dayjs from 'dayjs'
 import axios from 'axios'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { useRouter } from 'vue-router'
-import { Back } from '@element-plus/icons-vue'
+import { Back, Plus } from '@element-plus/icons-vue'
 import { taskService, eventEmitter, MEETING_EVENTS } from '@/services/taskService'
+import { useUserStore } from '@/store/modules/user'
 
 const router = useRouter()
+const userStore = useUserStore()
 
+// 日历事件接口定义
 interface CalendarEvent {
   date: string
   endDate?: string
@@ -162,8 +180,11 @@ interface CalendarEvent {
   type?: 'bg-primary' | 'bg-success' | 'bg-warning' | 'bg-danger'
   time?: string
   remindBefore?: number
+  id?: number | string
+  isMeeting?: boolean // 标识是否为会议
 }
 
+// 任务接口定义
 interface TodayTask {
   content: string
   time: string
@@ -175,6 +196,7 @@ interface TodayTask {
   remindBefore: number
 }
 
+// 任务类型选项
 const eventTypes = [
   { label: '普通', value: 'bg-primary' },
   { label: '重要', value: 'bg-success' },
@@ -182,7 +204,9 @@ const eventTypes = [
   { label: '紧急', value: 'bg-danger' }
 ] as const
 
+// 当前选中的日期
 const currentDate = ref(new Date())
+// 日历事件列表（示例数据，实际数据从后端加载）
 const events = ref<CalendarEvent[]>([
   { date: '2025-02-01', content: '产品需求评审', type: 'bg-primary' },
   { date: '2025-02-03', endDate: '2025-02-05', content: '项目周报会议', type: 'bg-primary' },
@@ -195,19 +219,84 @@ const events = ref<CalendarEvent[]>([
   { date: '2025-02-28', content: '月度总结会', type: 'bg-warning' }
 ])
 
+// 所有任务列表
 const allTasks = ref<TodayTask[]>([])
+// 选中日期的字符串格式
 const selectedDayStr = computed(() =>
   dayjs(currentDate.value).format('YYYY-MM-DD')
 )
+// 计算属性：获取选中日期的任务列表
 const todayTasks = computed(() => {
-  // 筛选当日任务并排序
-  const tasksOfDay = allTasks.value.filter(task => (task.date || '').slice(0, 10) === selectedDayStr.value)
+  // 筛选选中日期的任务并排序
+  const selectedDate = selectedDayStr.value
+  const tasksOfDay = allTasks.value.filter(task => {
+    if (!task.date) return false
+    // 处理不同的日期格式：YYYY-MM-DD 或 YYYY-MM-DD HH:mm 或 YYYY-MM-DD HH:mm:ss 或 ISO格式
+    let taskDateStr = String(task.date).trim()
+    
+    // 如果包含空格，只取日期部分
+    if (taskDateStr.includes(' ')) {
+      taskDateStr = taskDateStr.split(' ')[0]
+    }
+    // 如果包含T（ISO格式），只取日期部分
+    if (taskDateStr.includes('T')) {
+      taskDateStr = taskDateStr.split('T')[0]
+    }
+    // 确保格式为 YYYY-MM-DD（取前10个字符）
+    taskDateStr = taskDateStr.slice(0, 10)
+    
+    // 使用 dayjs 进行日期比较，确保格式一致
+    const taskDate = dayjs(taskDateStr).format('YYYY-MM-DD')
+    const selectedDateFormatted = dayjs(selectedDate).format('YYYY-MM-DD')
+    
+    const matches = taskDate === selectedDateFormatted
+    if (!matches && taskDateStr && selectedDate) {
+      // 调试信息：只在开发环境输出
+      if (process.env.NODE_ENV === 'development') {
+        console.log('任务日期不匹配:', {
+          taskId: task.id,
+          taskContent: task.content,
+          taskDateRaw: task.date,
+          taskDateParsed: taskDate,
+          selectedDate: selectedDateFormatted
+        })
+      }
+    }
+    
+    return matches
+  })
   return sortTasks([...tasksOfDay])
 })
+
+// 计算属性：根据选中日期显示标题（今日任务/XX月XX日任务）
+const selectedDateTitle = computed(() => {
+  const today = dayjs().format('YYYY-MM-DD')
+  const selected = selectedDayStr.value
+  if (selected === today) {
+    return '今日任务'
+  } else {
+    const date = dayjs(selected)
+    return `${date.format('M月D日')}任务`
+  }
+})
+
+// 计算属性：根据选中日期显示空状态文本
+const selectedDateEmptyText = computed(() => {
+  const today = dayjs().format('YYYY-MM-DD')
+  const selected = selectedDayStr.value
+  if (selected === today) {
+    return '今日暂无任务'
+  } else {
+    const date = dayjs(selected)
+    return `${date.format('M月D日')}暂无任务`
+  }
+})
+// 智能输入框内容
 const smartInput = ref('')
+// 提醒提前时间（分钟）
 const remindBefore = ref(15)
 
-// 弹窗相关
+// 弹窗相关状态
 const dialogVisible = ref(false)
 const dialogTitle = ref('添加会议')
 const editingEventIndex = ref<number>(-1)
@@ -222,30 +311,35 @@ const eventForm = ref<TodayTask>({
   remindBefore: 15
 })
 const editingTaskId = ref<number | null>(null)
-const isEditing = computed(() => editingTaskId.value !== null)
+const editingMeetingId = ref<number | null>(null)
+const isEditing = computed(() => editingTaskId.value !== null || editingMeetingId.value !== null)
+const isEditingMeeting = computed(() => editingMeetingId.value !== null)
 
+// 会议列表
 const meetings = ref<any[]>([])
 
+// 所有事件弹窗状态
 const allEventsDialogVisible = ref(false)
 const allEventsOfDay = ref<CalendarEvent[]>([])
 
+// 同步任务数据到日历事件
 function syncTasksToEvents() {
-  const taskEvents = allTasks.value.map((task: any) => ({
+  // 只添加任务，不添加会议
+  const taskEvents = allTasks.value
+    .filter((task: any) => task && task.id != null) // 过滤掉没有ID的任务
+    .map((task: any) => ({
     date: task.date,
     endDate: task.endDate || '',
     content: task.content,
-    type: task.type || 'bg-primary'
+      type: task.type || 'bg-primary',
+      id: Number(task.id), // 确保ID是数字
+      isMeeting: false
   }))
-  const meetingEvents = meetings.value.map((m: any) => ({
-    date: m.time ? dayjs(m.time).format('YYYY-MM-DD') : '',
-    endDate: '',
-    content: m.title,
-    type: 'bg-success'
-  }))
-  events.value = [...taskEvents, ...meetingEvents]
+  // 不再添加会议到日历事件中
+  events.value = taskEvents
 }
 
-// 刷新会议数据
+// 从服务端刷新会议数据
 const refreshMeetings = async () => {
   try {
     const allMeetings = await taskService.getAllMeetings()
@@ -259,6 +353,12 @@ const refreshMeetings = async () => {
 
 // 页面初始化
 onMounted(async () => {
+  // 清理已通知的任务ID（页面刷新后重新开始）
+  notifiedTaskIds.clear()
+  
+  // 确保 currentDate 初始化为今天的日期
+  currentDate.value = new Date()
+  
   // 获取今日任务
   try {
     const tasksData = await taskService.getAllTasks()
@@ -269,7 +369,15 @@ onMounted(async () => {
     }))
     allTasks.value = sortTasks(tasks)
     syncTasksToEvents()
+    console.log('已加载任务:', allTasks.value.length, '个')
+    // 调试信息：显示所有任务的日期
+    if (process.env.NODE_ENV === 'development') {
+      console.log('所有任务的日期:', allTasks.value.map(t => ({ id: t.id, content: t.content, date: t.date })))
+      console.log('当前选中的日期:', selectedDayStr.value)
+      console.log('今天的日期:', dayjs().format('YYYY-MM-DD'))
+    }
   } catch (e) {
+    console.error('加载任务失败:', e)
     allTasks.value = []
     syncTasksToEvents()
   }
@@ -302,14 +410,16 @@ document.addEventListener('visibilitychange', () => {
   }
 })
 
+// 计算属性：所有事件（包含任务和会议）
 const allEvents = computed(() => {
   // 直接返回events.value，因为syncTasksToEvents()已经包含了会议数据
   return events.value
 })
 
+// 格式化日期显示（只显示日期数字）
 const formatDate = (date: string) => date.split('-')[2]
 
-// 格式化任务时间显示
+// 格式化任务时间显示（处理全天任务）
 const formatTaskTime = (task: TodayTask) => {
   if (!task.time || task.time === '待定') {
     return '全天'
@@ -317,7 +427,7 @@ const formatTaskTime = (task: TodayTask) => {
   return task.time
 }
 
-// 任务排序函数
+// 任务排序函数：按时间排序，全天任务排在前面
 const sortTasks = (tasks: TodayTask[]) => {
   return tasks.sort((a, b) => {
     const timeA = a.time || '全天'
@@ -337,6 +447,7 @@ const sortTasks = (tasks: TodayTask[]) => {
   })
 }
 
+// 获取指定日期的所有事件
 const getEvents = (day: string) => {
   const result = (allEvents.value as CalendarEvent[]).filter((event) => {
     const eventDate = new Date(event.date)
@@ -347,6 +458,7 @@ const getEvents = (day: string) => {
   console.log('getEvents', day, result)
   return result
 }
+// 重置表单数据
 const resetForm = () => {
   eventForm.value = {
     content: '',
@@ -359,9 +471,39 @@ const resetForm = () => {
     remindBefore: 15
   }
   editingEventIndex.value = -1
+  editingTaskId.value = null
+  editingMeetingId.value = null
 }
+// 处理添加任务按钮点击
+const handleAddTask = () => {
+  // 使用当前选中的日期
+  const selectedDate = selectedDayStr.value
+  
+  dialogTitle.value = '添加任务'
+  // 设置默认时间为当前时间
+  const defaultDateTime = `${selectedDate} ${dayjs().format('HH:mm')}`
+  eventForm.value = {
+    content: '',
+    time: '',
+    completed: false,
+    id: '',
+    date: defaultDateTime,
+    type: 'bg-primary',
+    endDate: '',
+    remindBefore: remindBefore.value
+  }
+  editingTaskId.value = null
+  editingMeetingId.value = null
+  editingEventIndex.value = -1
+  dialogVisible.value = true
+}
+
+// 处理日历单元格点击
 const handleCellClick = (day: string) => {
-  dialogTitle.value = '添加会议'
+  // 更新当前选中的日期，以便显示该日期的任务
+  currentDate.value = new Date(day)
+  
+  dialogTitle.value = '添加任务'
   // 设置默认时间为当前时间
   const defaultDateTime = `${day} ${dayjs().format('HH:mm')}`
   eventForm.value = {
@@ -375,38 +517,115 @@ const handleCellClick = (day: string) => {
     remindBefore: 15
   }
   editingTaskId.value = null
+  editingMeetingId.value = null
   editingEventIndex.value = -1
   dialogVisible.value = true
 }
+// 处理日历事件点击（编辑任务或会议）
 const handleEventClick = (event: CalendarEvent) => {
+  // 判断是会议还是任务
+  if (event.isMeeting) {
   dialogTitle.value = '编辑会议'
+    // 找到对应的会议对象（支持数字和字符串ID匹配）
+    const meeting = meetings.value.find((m: any) => {
+      const meetingId = Number(m.id)
+      const eventId = Number(event.id)
+      return !isNaN(meetingId) && !isNaN(eventId) && meetingId === eventId
+    })
+    if (meeting && meeting.id != null) {
+      const meetingId = Number(meeting.id)
+      if (!isNaN(meetingId) && meetingId > 0) {
   eventForm.value = {
-    content: event.content,
-    time: event.time || '',
+          content: meeting.title || event.content,
+          time: meeting.time ? dayjs(meeting.time).format('HH:mm') : '',
     completed: false,
-    id: '',
-    date: event.date,
-    type: event.type || 'bg-primary',
-    endDate: event.endDate || '',
-    remindBefore: event.remindBefore || 15
-  }
+          id: meetingId,
+          date: meeting.time ? dayjs(meeting.time).format('YYYY-MM-DD HH:mm') : event.date,
+          type: 'bg-success',
+          endDate: '',
+          remindBefore: 15
+        }
+        editingMeetingId.value = meetingId
+        editingTaskId.value = null
   editingEventIndex.value = events.value.findIndex(
     (e) => e.date === event.date && e.content === event.content
   )
   dialogVisible.value = true
+      } else {
+        ElMessage.warning('会议ID无效')
+      }
+    } else {
+      ElMessage.warning('无法找到对应的会议信息')
+    }
+  } else {
+    dialogTitle.value = '编辑任务'
+    // 找到对应的任务对象（支持数字和字符串ID匹配）
+    const task = allTasks.value.find((t: any) => {
+      const taskId = Number(t.id)
+      const eventId = Number(event.id)
+      return !isNaN(taskId) && !isNaN(eventId) && taskId === eventId
+    })
+    if (task && task.id != null) {
+      const taskId = Number(task.id)
+      if (!isNaN(taskId) && taskId > 0) {
+        eventForm.value = {
+          content: task.content,
+          time: task.time || '',
+          completed: task.completed || false,
+          id: taskId,
+          date: task.date ? `${task.date} ${task.time || ''}`.trim() : event.date,
+          type: task.type || 'bg-primary',
+          endDate: task.endDate || '',
+          remindBefore: task.remindBefore || 15
+        }
+        editingTaskId.value = taskId
+        editingMeetingId.value = null
+        editingEventIndex.value = events.value.findIndex(
+          (e) => e.date === event.date && e.content === event.content
+        )
+        dialogVisible.value = true
+      } else {
+        ElMessage.warning('任务ID无效')
+      }
+    } else {
+      ElMessage.warning('无法找到对应的任务信息')
+    }
+  }
 }
+// 保存事件（添加或更新任务/会议）
 const handleSaveEvent = async () => {
   if (!eventForm.value.content || !eventForm.value.date) return
-  
-  // 从完整的日期时间字符串中提取日期和时间部分
-  const fullDateTime = eventForm.value.date
-  const datePart = fullDateTime.includes(' ') ? fullDateTime.split(' ')[0] : fullDateTime
-  const timePart = fullDateTime.includes(' ') ? fullDateTime.split(' ')[1] : '待定'
   
   const token = localStorage.getItem('token')
   const headers = { 'Authorization': `Bearer ${token}` }
   
-  if (editingTaskId.value) {
+  if (isEditingMeeting.value && editingMeetingId.value) {
+    // 更新会议
+    const fullDateTime = eventForm.value.date
+    const meetingData = {
+      title: eventForm.value.content,
+      time: fullDateTime,
+      location: '',
+      period: 'none',
+      status: 'upcoming',
+      participants: []
+    }
+    
+    const success = await taskService.updateMeeting(editingMeetingId.value, meetingData)
+    if (success) {
+      await refreshMeetings()
+      ElMessage.success('会议更新成功')
+      dialogVisible.value = false
+      resetForm()
+    } else {
+      ElMessage.error('会议更新失败')
+    }
+  } else if (editingTaskId.value) {
+    // 更新任务
+  const fullDateTime = eventForm.value.date
+  const datePart = fullDateTime.includes(' ') ? fullDateTime.split(' ')[0] : fullDateTime
+  const timePart = fullDateTime.includes(' ') ? fullDateTime.split(' ')[1] : '待定'
+  
     await axios.put(`/api/today-tasks/${editingTaskId.value}`, {
       content: eventForm.value.content,
       time: timePart,
@@ -423,7 +642,14 @@ const handleSaveEvent = async () => {
       syncTasksToEvents()
     }
     ElMessage.success('任务更新成功')
+    dialogVisible.value = false
+    resetForm()
   } else {
+    // 添加任务（会议应该通过会议管理页面创建）
+    const fullDateTime = eventForm.value.date
+    const datePart = fullDateTime.includes(' ') ? fullDateTime.split(' ')[0] : fullDateTime
+    const timePart = fullDateTime.includes(' ') ? fullDateTime.split(' ')[1] : '待定'
+    
     await axios.post('/api/today-tasks', {
       content: eventForm.value.content,
       time: timePart,
@@ -440,24 +666,86 @@ const handleSaveEvent = async () => {
       syncTasksToEvents()
     }
     ElMessage.success('任务添加成功')
-  }
   dialogVisible.value = false
   resetForm()
+  }
 }
+// 删除事件（任务或会议）
 const handleDeleteEvent = async () => {
-  if (isEditing.value && editingTaskId.value) {
-    try {
+  if (!isEditing.value) {
+    ElMessage.warning('请先选择要删除的项目')
+    return
+  }
+  
+  // 检查是否有有效的ID
+  if (!editingTaskId.value && !editingMeetingId.value) {
+    ElMessage.warning('无法获取要删除的项目ID')
+    return
+  }
+  
+  // 保存当前编辑状态
+  const currentTaskId = editingTaskId.value
+  const currentMeetingId = editingMeetingId.value
+  const isMeeting = isEditingMeeting.value
+  
+  // 先关闭编辑对话框，确保确认对话框显示在最前面
+  dialogVisible.value = false
+  
+  // 等待对话框关闭动画完成
+  await new Promise(resolve => setTimeout(resolve, 300))
+  
+  try {
+    const token = localStorage.getItem('token')
+    const headers = { 'Authorization': `Bearer ${token}` }
+    
+    if (isMeeting && currentMeetingId) {
+      // 删除会议
+      await ElMessageBox.confirm('确定要删除该会议吗？', '删除会议', {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        zIndex: 4000, // 设置更高的 z-index
+        appendToBody: true // 确保添加到 body
+      })
+      
+      const success = await taskService.deleteMeeting(currentMeetingId)
+      if (success) {
+        // 刷新会议列表
+        await refreshMeetings()
+        ElMessage.success('会议删除成功')
+        // 最后重置表单
+        resetForm()
+      } else {
+        ElMessage.error('会议删除失败')
+      }
+    } else if (currentTaskId) {
+      // 删除任务
       await ElMessageBox.confirm('确定要删除该任务吗？', '删除任务', {
         confirmButtonText: '删除',
         cancelButtonText: '取消',
         type: 'warning',
+        zIndex: 4000, // 设置更高的 z-index
+        appendToBody: true // 确保添加到 body
       })
-      const token = localStorage.getItem('token')
-      const headers = { 'Authorization': `Bearer ${token}` }
-      await axios.delete(`/api/today-tasks/${editingTaskId.value}`, { headers })
-      // 先关闭弹窗
-      dialogVisible.value = false
-      // 再刷新任务列表
+      
+      // 确保ID是有效的数字
+      const taskId = Number(currentTaskId)
+      if (isNaN(taskId) || taskId <= 0) {
+        ElMessage.error('无效的任务ID')
+        return
+      }
+      
+      const deleteRes = await axios.delete(`/api/today-tasks/${taskId}`, { headers })
+      
+      // 检查删除是否成功
+      if (deleteRes.data && deleteRes.data.code === 0) {
+        // 从本地数据中移除已删除的任务
+        allTasks.value = allTasks.value.filter((t: any) => Number(t.id) !== taskId)
+        // 同步更新事件列表
+        syncTasksToEvents()
+        ElMessage.success('任务删除成功')
+      } else {
+        // 如果删除失败，重新获取完整列表
       const res = await axios.get('/api/today-tasks', { headers })
       if (res.data && res.data.code === 0) {
         const tasks = res.data.tasks.map((t: any) => ({ ...t, type: t.type || 'bg-primary', remindBefore: typeof t.remindBefore === 'number' ? t.remindBefore : 15 }))
@@ -465,45 +753,274 @@ const handleDeleteEvent = async () => {
         syncTasksToEvents()
       }
       ElMessage.success('任务删除成功')
+      }
       // 最后重置表单
       resetForm()
-    } catch (e) {
-      console.error('删除任务出错', e)
+    } else {
+      ElMessage.warning('无法确定要删除的项目类型')
+    }
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      console.error('删除出错', e)
+      ElMessage.error(`删除失败: ${e.message || '未知错误'}`)
+    } else {
+      // 如果用户取消，重新打开编辑对话框
+      if (isMeeting && currentMeetingId) {
+        editingMeetingId.value = currentMeetingId
+        editingTaskId.value = null
+      } else if (currentTaskId) {
+        editingTaskId.value = currentTaskId
+        editingMeetingId.value = null
+      }
+      dialogVisible.value = true
     }
   }
 }
-// 智能添加日程（模拟，后续可对接AI）
+/**
+ * 解析智能输入中的日期和时间
+ */
+function parseSmartInput(input: string): { date: string, time: string, content: string } {
+  let date = dayjs().format('YYYY-MM-DD') // 默认今天
+  let time = dayjs().format('HH:mm') // 默认当前时间
+  let content = input.trim()
+  
+  const inputLower = input.toLowerCase()
+  
+  // 解析日期关键词
+  let dateMatched = false
+  let matchedDatePattern = ''
+  
+  // 优先匹配具体的日期格式：X月X日、X月X号、YYYY年X月X日等
+  const datePatterns = [
+    { pattern: /(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})[日号]/, type: 'full' },  // 2026年1月6日、2026年1月6号
+    { pattern: /(\d{1,2})月\s*(\d{1,2})[日号]/, type: 'month-day' },  // 1月6日、1月6号、3月15日
+    { pattern: /(\d{1,2})\/(\d{1,2})/, type: 'slash' },  // 1/6、3/15（月/日格式）
+    { pattern: /(\d{4})-(\d{1,2})-(\d{1,2})/, type: 'dash' },  // 2026-01-06
+    { pattern: /(\d{4})\.(\d{1,2})\.(\d{1,2})/, type: 'dot' }  // 2026.01.06
+  ]
+  
+  for (const { pattern, type } of datePatterns) {
+    const match = pattern.exec(input)
+    if (match) {
+      matchedDatePattern = match[0]
+      let year: number, month: number, day: number
+      
+      if (type === 'full') {
+        // 2026年1月6日格式
+        year = parseInt(match[1])
+        month = parseInt(match[2])
+        day = parseInt(match[3])
+      } else if (type === 'month-day') {
+        // 1月6日格式
+        const currentYear = dayjs().year()
+        year = currentYear
+        month = parseInt(match[1])
+        day = parseInt(match[2])
+        // 如果日期已过，可能是明年的日期
+        const testDate = dayjs(`${year}-${month}-${day}`)
+        if (testDate.isBefore(dayjs(), 'day')) {
+          year = currentYear + 1
+        }
+      } else if (type === 'slash') {
+        // 1/6格式（月/日）
+        const currentYear = dayjs().year()
+        year = currentYear
+        month = parseInt(match[1])
+        day = parseInt(match[2])
+        // 如果日期已过，可能是明年的日期
+        const testDate = dayjs(`${year}-${month}-${day}`)
+        if (testDate.isBefore(dayjs(), 'day')) {
+          year = currentYear + 1
+        }
+      } else if (type === 'dash' || type === 'dot') {
+        // 2026-01-06 或 2026.01.06格式
+        year = parseInt(match[1])
+        month = parseInt(match[2])
+        day = parseInt(match[3])
+      }
+      
+      // 验证日期有效性
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        try {
+          const parsedDate = dayjs(`${year}-${month}-${day}`)
+          if (parsedDate.isValid()) {
+            date = parsedDate.format('YYYY-MM-DD')
+            dateMatched = true
+            break
+          }
+        } catch (e) {
+          console.error('日期解析失败:', e)
+        }
+      }
+    }
+  }
+  
+  // 如果没有匹配到具体日期，再匹配相对日期
+  if (!dateMatched) {
+    if (inputLower.includes('明天') || inputLower.includes('明日')) {
+      date = dayjs().add(1, 'day').format('YYYY-MM-DD')
+      dateMatched = true
+    } else if (inputLower.includes('后天') || inputLower.includes('后日')) {
+      date = dayjs().add(2, 'day').format('YYYY-MM-DD')
+      dateMatched = true
+    } else if (inputLower.includes('大后天')) {
+      date = dayjs().add(3, 'day').format('YYYY-MM-DD')
+      dateMatched = true
+    } else if (inputLower.includes('今天') || inputLower.includes('今日')) {
+      date = dayjs().format('YYYY-MM-DD')
+      dateMatched = true
+    } else if (inputLower.includes('昨天') || inputLower.includes('昨日')) {
+      date = dayjs().subtract(1, 'day').format('YYYY-MM-DD')
+      dateMatched = true
+    }
+  }
+  
+  // 解析时间
+  let timeMatched = false
+  let matchedTimePattern = ''
+  // 匹配 "下午3点"、"下午三点"、"3点"、"15:00" 等格式
+  const timePatterns = [
+    /(?:上午|早上|早晨|早)\s*(\d{1,2})(?:点|:)?(\d{2})?/,
+    /(?:下午|晚上|傍晚|晚)\s*(\d{1,2})(?:点|:)?(\d{2})?/,
+    /(\d{1,2}):(\d{2})/,
+    /(\d{1,2})点(\d{2})?/,
+    /(\d{1,2})时(\d{2})?/
+  ]
+  
+  for (const pattern of timePatterns) {
+    const match = input.match(pattern)
+    if (match) {
+      let hour = parseInt(match[1])
+      let minute = match[2] ? parseInt(match[2]) : 0
+      
+      // 处理下午/晚上时间
+      if (inputLower.includes('下午') || inputLower.includes('晚上') || inputLower.includes('傍晚') || inputLower.includes('晚')) {
+        if (hour < 12) {
+          hour += 12
+        }
+      }
+      
+      // 处理上午时间
+      if (inputLower.includes('上午') || inputLower.includes('早上') || inputLower.includes('早晨') || inputLower.includes('早')) {
+        if (hour === 12) {
+          hour = 0
+        }
+      }
+      
+      time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+      matchedTimePattern = match[0]
+      timeMatched = true
+      break
+    }
+  }
+  
+  // 如果没有匹配到具体时间，但有"下午"、"晚上"等关键词，设置默认时间
+  if (!timeMatched) {
+    if (inputLower.includes('下午')) {
+      time = '14:00' // 默认下午2点
+      timeMatched = true
+    } else if (inputLower.includes('晚上') || inputLower.includes('傍晚') || inputLower.includes('晚')) {
+      time = '19:00' // 默认晚上7点
+      timeMatched = true
+    } else if (inputLower.includes('上午') || inputLower.includes('早上') || inputLower.includes('早晨') || inputLower.includes('早')) {
+      time = '09:00' // 默认上午9点
+      timeMatched = true
+    }
+  }
+  
+  // 清理内容：移除日期和时间相关的关键词
+  let cleanContent = content
+  
+  // 移除日期关键词和模式
+  if (dateMatched) {
+    // 移除匹配到的日期模式
+    if (matchedDatePattern) {
+      cleanContent = cleanContent.replace(new RegExp(matchedDatePattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '')
+    }
+    // 移除相对日期关键词
+    cleanContent = cleanContent
+      .replace(/明天|明日/g, '')
+      .replace(/后天|后日/g, '')
+      .replace(/大后天/g, '')
+      .replace(/今天|今日/g, '')
+      .replace(/昨天|昨日/g, '')
+    // 移除年月日关键词
+    cleanContent = cleanContent
+      .replace(/\d{4}年/g, '')
+      .replace(/\d{1,2}月/g, '')
+      .replace(/\d{1,2}[日号]/g, '')
+  }
+  
+  // 移除时间关键词和模式
+  if (timeMatched && matchedTimePattern) {
+    cleanContent = cleanContent.replace(new RegExp(matchedTimePattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '')
+  }
+  
+  // 移除其他时间相关关键词
+  cleanContent = cleanContent
+    .replace(/上午|早上|早晨|早/g, '')
+    .replace(/下午|晚上|傍晚|晚/g, '')
+    .replace(/\d{1,2}[：:]?\d{0,2}\s*(点|时)/g, '')
+    .replace(/\d{1,2}[：:]?\d{2}/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  
+  // 如果清理后内容为空，使用默认值
+  if (!cleanContent || cleanContent.length === 0) {
+    cleanContent = '新任务'
+  }
+  
+  return { date, time, content: cleanContent }
+}
+
+// 智能添加会议：解析自然语言输入，自动识别日期和时间
 async function handleSmartAdd() {
   if (!smartInput.value) return
   try {
-    const today = dayjs().format('YYYY-MM-DD')
-    // 使用当前时间作为默认时间
-    const currentTime = dayjs().format('HH:mm')
-    const token = localStorage.getItem('token')
-    const headers = { 'Authorization': `Bearer ${token}` }
-    const res = await axios.post('/api/today-tasks', {
-      content: smartInput.value,
-      time: currentTime,
-      completed: false,
-      date: today,
-      endDate: '',
-      remindBefore: 15
-    }, { headers })
-    if (res.data && res.data.code === 0) {
-      const newTask = { ...res.data.task, type: 'bg-primary', remindBefore: 15 }
-      allTasks.value = sortTasks([...allTasks.value, newTask])
-      events.value.push({ ...res.data.task, remindBefore: 15 })
-      smartInput.value = ''
-      syncTasksToEvents()
+    // 解析输入文本，提取日期和时间
+    const { date, time, content } = parseSmartInput(smartInput.value)
+    
+    console.log('智能解析结果:', { date, time, content, original: smartInput.value })
+    
+    // 获取当前用户信息作为主持人
+    const userInfo = userStore.info
+    const hostName = userInfo.realName || userInfo.userName || userInfo.nickName || '我'
+    
+    // 将日期和时间组合成完整的日期时间字符串（ISO格式）
+    const fullDateTime = `${date} ${time}:00`
+    const isoDateTime = dayjs(fullDateTime).format('YYYY-MM-DDTHH:mm:ss')
+    
+    // 创建会议而不是任务
+    const meetingData = {
+      title: content,
+      host: hostName,
+      time: isoDateTime,
+      location: '',
+      period: 'none',
+      status: 'upcoming',
+      participants: []
     }
-  } catch (e) {
-    // 可加错误提示
+    
+    const success = await taskService.createMeeting(meetingData)
+    if (success) {
+      // 刷新会议列表
+      await refreshMeetings()
+      smartInput.value = ''
+      ElMessage.success('会议添加成功')
+    } else {
+      ElMessage.error('会议添加失败')
+    }
+  } catch (e: any) {
+    console.error('智能添加失败:', e)
+    ElMessage.error('添加失败: ' + (e.message || '未知错误'))
   }
 }
+// 显示指定日期的所有事件弹窗
 function showAllEvents(day: string) {
   allEventsOfDay.value = getEvents(day)
   allEventsDialogVisible.value = true
 }
+// 处理删除任务
 async function handleDeleteTask(idx: number) {
   const task = todayTasks.value[idx]
   console.log('[删除按钮] idx:', idx, task)
@@ -515,7 +1032,17 @@ async function handleDeleteTask(idx: number) {
     })
     const token = localStorage.getItem('token')
     const headers = { 'Authorization': `Bearer ${token}` }
-    await axios.delete(`/api/today-tasks/${task.id}`, { headers })
+    const deleteRes = await axios.delete(`/api/today-tasks/${task.id}`, { headers })
+    
+    // 检查删除是否成功
+    if (deleteRes.data && deleteRes.data.code === 0) {
+      // 从本地数据中移除已删除的任务
+      allTasks.value = allTasks.value.filter((t: any) => Number(t.id) !== Number(task.id))
+      // 同步更新事件列表
+      syncTasksToEvents()
+      ElMessage.success('任务删除成功')
+    } else {
+      // 如果删除失败或响应格式不同，重新获取完整列表
     const res = await axios.get('/api/today-tasks', { headers })
     if (res.data && res.data.code === 0) {
       const tasks = res.data.tasks.map((t: any) => ({ ...t, type: t.type || 'bg-primary', remindBefore: typeof t.remindBefore === 'number' ? t.remindBefore : 15 }))
@@ -523,10 +1050,12 @@ async function handleDeleteTask(idx: number) {
       syncTasksToEvents()
     }
     ElMessage.success('任务删除成功')
+    }
   } catch (e) {
     // 取消操作
   }
 }
+// 处理任务完成状态切换
 async function handleCheckTask(task: TodayTask) {
   // 新状态（用户点击后的状态）
   const newCompleted = task.completed
@@ -548,11 +1077,9 @@ async function handleCheckTask(task: TodayTask) {
     const taskId = typeof task.id === 'string' ? parseInt(task.id) : task.id
     const success = await taskService.updateTaskStatus(taskId, newCompleted)
     if (success) {
-      // 强制刷新任务列表
+      // 强制刷新任务列表（获取所有任务，不只是今天的）
       const tasks = await taskService.getAllTasks()
-      const today = new Date().toISOString().split('T')[0]
-      const todayTasksData = tasks.filter((t: any) => t.date === today)
-      allTasks.value = sortTasks(todayTasksData.map((t: any) => ({ 
+      allTasks.value = sortTasks(tasks.map((t: any) => ({ 
         ...t, 
         type: t.type || 'bg-primary', 
         remindBefore: typeof t.remindBefore === 'number' ? t.remindBefore : 15 
@@ -572,6 +1099,7 @@ async function handleCheckTask(task: TodayTask) {
     }
   }
 }
+// 处理点击任务名称（打开编辑对话框）
 const handleClickTaskName = (task: TodayTask) => {
   dialogTitle.value = '编辑会议'
   
@@ -596,35 +1124,92 @@ const handleClickTaskName = (task: TodayTask) => {
   dialogVisible.value = true
 }
 
+// 任务提醒功能：定时检查任务时间，发送提醒通知
 let notifiedTaskIds: Set<string | number> = new Set()
 setInterval(() => {
   const now = new Date()
-  todayTasks.value.forEach(task => {
+  const today = dayjs().format('YYYY-MM-DD')
+  
+  // 检查所有未完成的任务，而不仅仅是当前选中日期的任务
+  allTasks.value.forEach(task => {
     const t = task as TodayTask
+    // 跳过已完成的任务
     if (t.completed) return
-    if (!t.time) return
-    let remindBefore = 15
-    if (typeof t.remindBefore === 'number') remindBefore = t.remindBefore
-    if (eventForm.value && eventForm.value.content === t.content && typeof eventForm.value.remindBefore === 'number') {
-      remindBefore = eventForm.value.remindBefore
+    // 跳过没有时间的任务
+    if (!t.time || t.time === '待定' || t.time === '全天') return
+    
+    // 获取任务日期（提取日期部分）
+    let taskDateStr = (t.date || '').trim()
+    if (taskDateStr.includes(' ')) {
+      taskDateStr = taskDateStr.split(' ')[0]
     }
-    const taskDateTime = new Date(`${t.date} ${t.time}`)
-    const remindTime = new Date(taskDateTime.getTime() - remindBefore * 60 * 1000)
+    if (taskDateStr.includes('T')) {
+      taskDateStr = taskDateStr.split('T')[0]
+    }
+    taskDateStr = taskDateStr.slice(0, 10)
+    
+    // 只提醒今天和未来的任务
+    if (taskDateStr < today) return
+    
+    // 获取提醒时间设置
+    let remindBefore = 15 // 默认15分钟
+    if (typeof t.remindBefore === 'number') {
+      remindBefore = t.remindBefore
+    }
+    
+    // 构建任务日期时间
+    let taskDateTime: Date
+    try {
+      // 处理日期格式：YYYY-MM-DD 或 YYYY-MM-DD HH:mm
+      if (t.date.includes(' ')) {
+        // 如果date已经包含时间，直接使用
+        taskDateTime = dayjs(t.date).toDate()
+      } else {
+        // 如果date只有日期，需要组合time
+        const timeStr = t.time.includes(':') ? t.time : `${t.time}:00`
+        taskDateTime = dayjs(`${taskDateStr} ${timeStr}`).toDate()
+      }
+    } catch (e) {
+      console.error('解析任务日期时间失败:', t.date, t.time, e)
+      return
+    }
+    
+    // 计算提醒时间
+    const remindTime = dayjs(taskDateTime).subtract(remindBefore, 'minute').toDate()
+    
+    // 检查是否在提醒时间窗口内（5分钟窗口，确保不会错过）
+    const timeDiff = now.getTime() - remindTime.getTime()
     if (
-      now >= remindTime &&
-      now < new Date(remindTime.getTime() + 60 * 1000) &&
+      timeDiff >= 0 &&
+      timeDiff <= 5 * 60 * 1000 && // 5分钟窗口
       !notifiedTaskIds.has(t.id)
     ) {
+      // 计算距离任务开始还有多长时间
+      const minutesLeft = Math.floor((taskDateTime.getTime() - now.getTime()) / (60 * 1000))
+      let timeText = ''
+      if (minutesLeft <= 0) {
+        timeText = '即将开始'
+      } else if (minutesLeft < 60) {
+        timeText = `${minutesLeft}分钟后开始`
+      } else {
+        const hours = Math.floor(minutesLeft / 60)
+        const mins = minutesLeft % 60
+        timeText = mins > 0 ? `${hours}小时${mins}分钟后开始` : `${hours}小时后开始`
+      }
+      
       ElNotification({
         title: '任务提醒',
-        message: `任务「${t.content}」即将开始！`,
-        type: 'warning'
+        message: `任务「${t.content}」${timeText}！`,
+        type: 'warning',
+        duration: 5000, // 显示5秒
+        position: 'top-right'
       })
       notifiedTaskIds.add(t.id)
     }
   })
-}, 60 * 1000)
+}, 60 * 1000) // 每分钟检查一次
 
+// 跳转到工作台页面
 function goToWorkbench() {
   router.push('/workbench')
 }
@@ -724,6 +1309,11 @@ function goToWorkbench() {
           h3 {
             margin-bottom: 0;
           }
+          .header-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+          }
         }
         .task-list {
           list-style: none;
@@ -795,4 +1385,39 @@ function goToWorkbench() {
 .type-success { color: var(--el-color-success); }
 .type-warning { color: var(--el-color-warning); }
 .type-danger { color: var(--el-color-error); }
+
+// 单选按钮标签颜色
+:deep(.el-radio) {
+  .radio-label {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    transition: all 0.3s;
+    
+    &.radio-warning {
+      background: var(--el-color-warning-light-9);
+      color: var(--el-color-warning);
+      font-weight: 500;
+    }
+    
+    &.radio-danger {
+      background: var(--el-color-error-light-9);
+      color: var(--el-color-error);
+      font-weight: 500;
+    }
+  }
+  
+  // 选中状态时保持颜色
+  &.is-checked {
+    .radio-warning {
+      background: var(--el-color-warning-light-8);
+      color: var(--el-color-warning);
+    }
+    
+    .radio-danger {
+      background: var(--el-color-error-light-8);
+      color: var(--el-color-error);
+    }
+  }
+}
 </style> 

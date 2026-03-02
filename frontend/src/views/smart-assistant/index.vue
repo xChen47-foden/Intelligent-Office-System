@@ -5,7 +5,7 @@
         <span>历史对话</span>
         <el-button size="small" @click="createNewSession">新建会话</el-button>
       </div>
-      <ul>
+      <ul v-if="sessions.length > 0">
         <li
           v-for="s in sessions"
           :key="s.id"
@@ -20,11 +20,15 @@
           <el-button type="text" size="small" class="delete-btn" @click.stop="confirmDeleteSession(s.id)">删除</el-button>
         </li>
       </ul>
+      <div v-else class="empty-sessions">
+        <div class="empty-text">暂无对话</div>
+        <div class="empty-hint">点击"新建会话"开始对话</div>
+      </div>
     </aside>
     <section class="chat-main">
       <div class="chat-header">
         <span>智能助手</span>
-        <div class="header-actions">
+        <div class="header-actions" v-if="sessions.length > 0 && currentSessionId">
           <el-button size="small" @click="clearHistoryKeepFirst" title="清理对话，保留第一句">
             <el-icon><Delete /></el-icon>
             重置对话
@@ -32,24 +36,29 @@
         </div>
       </div>
       <div class="chat-history" ref="historyRef">
+        <div v-if="sessions.length === 0 && !isStreaming" class="empty-chat">
+          <div class="empty-chat-icon">💬</div>
+          <div class="empty-chat-text">暂无对话</div>
+          <div class="empty-chat-hint">开始与智能助手对话吧</div>
+        </div>
         <div v-for="(msg, idx) in history" :key="idx" :class="['chat-msg', msg.from === 'user' ? 'right' : 'left']">
           <el-avatar :size="32" :src="msg.avatar" />
           <div class="msg-content">
-            <div class="msg-text" v-html="renderMarkdown(msg.content)"></div>
+            <div class="msg-text" v-html="renderMarkdown(msg.content || '')"></div>
             <div class="msg-time">{{ msg.time }}</div>
           </div>
         </div>
         <div v-if="isStreaming && streamingContent" class="chat-msg left">
           <el-avatar :size="32" :src="botAvatar" />
           <div class="msg-content">
-            <div class="msg-text" v-html="renderMarkdown(streamingContent)"></div>
+            <div class="msg-text" v-html="renderMarkdown(streamingContent || '')"></div>
             <div class="msg-time">{{ getNowTime() }}</div>
           </div>
         </div>
       </div>
-      <div class="chat-input-bar">
+      <div class="chat-input-bar" v-if="sessions.length > 0 && currentSessionId">
         <div class="input-tools">
-          <el-button size="small" @click="toggleEmojiPicker" style="margin-right: 8px;">
+          <el-button size="small" @click.stop="toggleEmojiPicker" style="margin-right: 8px;">
             <el-icon><ChatDotSquare /></el-icon>
           </el-button>
           <el-upload
@@ -60,11 +69,14 @@
             :headers="headers"
             name="file"
             accept=".jpg,.jpeg,.png,.gif,.webp,.svg"
-            style="margin-right: 8px;"
+            style="margin-right: 8px; display: inline-block;"
+            :auto-upload="true"
           >
+            <template #trigger>
             <el-button size="small" title="上传图片">
               <el-icon><Picture /></el-icon>
             </el-button>
+            </template>
           </el-upload>
           <el-upload
             :action="uploadUrl"
@@ -74,13 +86,17 @@
             :headers="headers"
             name="file"
             accept=".doc,.docx,.pdf,.zip,.rar,.txt,.xlsx,.xls,.ppt,.pptx"
+            style="display: inline-block;"
+            :auto-upload="true"
           >
+            <template #trigger>
             <el-button size="small" title="上传附件">
               <el-icon><Upload /></el-icon>
             </el-button>
+            </template>
           </el-upload>
           <!-- 表情包选择器 -->
-          <div v-if="showEmojiPicker" class="emoji-picker">
+          <div v-if="showEmojiPicker" class="emoji-picker" @click.stop>
             <div class="emoji-grid">
               <span v-for="emoji in emojiList" :key="emoji" class="emoji-item" @click="insertEmoji(emoji)">
                 {{ emoji }}
@@ -93,10 +109,20 @@
             v-model="ragQuestion"
             type="textarea"
             :autosize="{ minRows: 3, maxRows: 6 }"
-            placeholder="请输入你的问题或办公需求，如'帮我生成会议纪要'"
+            :placeholder="currentFileUrl ? `已选择文件：${currentFileName}，请输入问题或直接发送分析文件` : '请输入你的问题或办公需求，如\'帮我生成会议纪要\''"
             @keyup.enter="ragSearch"
           />
+          <div style="display: flex; gap: 8px;">
+            <el-button 
+              v-if="currentFileUrl" 
+              type="success" 
+              @click="analyzeFile(currentFileUrl, currentFileName, ragQuestion || '')" 
+              :loading="ragLoading"
+            >
+              分析文件
+            </el-button>
           <el-button type="primary" @click="ragSearch" :loading="ragLoading">发送</el-button>
+          </div>
         </div>
       </div>
     </section>
@@ -121,6 +147,7 @@ import { aiAutoSendToAll } from '@/services/ai'
 import { useUserStore } from '@/store/modules/user'
 import { storeToRefs } from 'pinia'
 import defaultAvatar from '@/assets/img/avatar/avatar5.jpg'
+import dayjs from 'dayjs'
 
 const userStore = useUserStore()
 const { info } = storeToRefs(userStore)
@@ -153,6 +180,7 @@ interface Message {
   time: string
   avatar?: string
   sessionId: string
+  imageUrl?: string  // 图片URL，用于图片分析
 }
 
 const sessions = ref<any[]>([])
@@ -165,6 +193,9 @@ const isStreaming = ref(false)
 const deleteSessionDialogVisible = ref(false)
 const sessionIdToDelete = ref('')
 const uploadUrl = '/api/assistant/upload'
+const currentImageUrl = ref('')  // 当前待分析的图片URL
+const currentFileUrl = ref('')  // 当前待分析的文件URL
+const currentFileName = ref('')  // 当前待分析的文件名
 
 // 使用计算属性获取最新的认证头
 const headers = computed(() => {
@@ -259,6 +290,12 @@ onMounted(() => {
             msg.avatar = botAvatar
           }
           if (!msg.time) msg.time = getNowTime()
+          // 确保content是字符串
+          if (msg.content === null || msg.content === undefined) {
+            msg.content = ''
+          } else {
+            msg.content = String(msg.content)
+          }
         })
       })
       if (sessions.value.length) {
@@ -328,20 +365,27 @@ watch([sessions, currentSessionId], () => {
 function analyzeIntent(message: string) {
   const msg = message.toLowerCase()
   
-  // 日程相关 - 更智能的识别
-  if (msg.includes('添加日程') || msg.includes('新建日程') || msg.includes('创建日程') || 
-      msg.includes('安排') || msg.includes('提醒我') || msg.includes('记住') ||
-      msg.includes('添加到日历') || msg.includes('加到日历') || msg.includes('日历') ||
-      msg.includes('开会') && (msg.includes('时间') || msg.includes('点') || msg.includes('明天') || msg.includes('今天') || msg.includes('下午') || msg.includes('上午')) ||
-      msg.includes('会议') && (msg.includes('时间') || msg.includes('点') || msg.includes('明天') || msg.includes('今天')) ||
-      /\d+点.*?(开会|会议|活动|任务)/.test(msg) ||
-      /(今天|明天|后天|下周|上午|下午|晚上).*?(开会|会议|活动|任务|提醒)/.test(msg)) {
-    return { type: 'schedule_add', content: message }
+  // 日程相关 - 先识别查看意图，避免误识别为添加
+  // 查看任务/日程的识别（优先级更高）
+  if ((msg.includes('查看') && (msg.includes('任务') || msg.includes('日程') || msg.includes('安排'))) ||
+      msg.includes('今天有什么') || msg.includes('今天有哪些') || msg.includes('今日有什么') || msg.includes('今日有哪些') ||
+      msg.includes('明天有什么') || msg.includes('明天有哪些') || msg.includes('明日有什么') || msg.includes('明日有哪些') ||
+      msg.includes('后天有什么') || msg.includes('后天有哪些') ||
+      msg.includes('查看今天') || msg.includes('查看今日') || msg.includes('查看明天') || msg.includes('查看明日') ||
+      msg.includes('查看后天') || msg.includes('我的安排') || msg.includes('今日安排') || msg.includes('日程表') ||
+      (msg.includes('日程安排') && !msg.includes('添加') && !msg.includes('创建') && !msg.includes('新建')) ||
+      /(今天|明天|后天|下周|\d+月\d+[日号]).*?(有什么|有哪些|任务|日程|安排)/.test(msg)) {
+    return { type: 'schedule_view', content: message }
   }
   
-  if (msg.includes('查看日程') || msg.includes('今天有什么') || msg.includes('日程安排') ||
-      msg.includes('我的安排') || msg.includes('今日安排') || msg.includes('日程表')) {
-    return { type: 'schedule_view', content: message }
+  // 会议相关 - 优先识别添加会议（必须在添加日程之前）
+  if ((msg.includes('添加会议') || msg.includes('创建会议') || msg.includes('新建会议') ||
+      msg.includes('安排会议') || msg.includes('开个会') || msg.includes('组织会议') || msg.includes('召开会议') ||
+      msg.includes('会议预约') || msg.includes('预约会议') || msg.includes('帮我添加会议') || msg.includes('帮我创建会议')) ||
+      // 如果明确提到"会议"且包含时间信息，优先识别为会议
+      (msg.includes('会议') && (msg.includes('添加') || msg.includes('创建') || msg.includes('新建') || msg.includes('安排')) &&
+       (msg.includes('时间') || msg.includes('点') || msg.includes('明天') || msg.includes('今天') || msg.includes('下午') || msg.includes('上午') || msg.includes('晚上')))) {
+    return { type: 'meeting_create', content: message }
   }
   
   // 文档相关 - 更智能的识别
@@ -360,11 +404,16 @@ function analyzeIntent(message: string) {
     return { type: 'doc_search', content: message }
   }
   
-  // 会议相关 - 更智能的识别
-  if (msg.includes('安排会议') || msg.includes('创建会议') || msg.includes('新建会议') ||
-      msg.includes('开个会') || msg.includes('组织会议') || msg.includes('召开会议') ||
-      msg.includes('会议预约') || msg.includes('预约会议')) {
-    return { type: 'meeting_create', content: message }
+  // 添加日程的识别（需要明确包含添加/创建等关键词，且不是会议）
+  if ((msg.includes('添加') || msg.includes('新建') || msg.includes('创建') || msg.includes('安排') || msg.includes('提醒我') || msg.includes('记住')) &&
+      (msg.includes('日程') || msg.includes('任务') || msg.includes('提醒') || msg.includes('日历')) ||
+      msg.includes('添加到日历') || msg.includes('加到日历') ||
+      // 如果提到"开会"但没有明确说"会议"，识别为任务
+      (msg.includes('开会') && !msg.includes('会议') && (msg.includes('时间') || msg.includes('点') || msg.includes('明天') || msg.includes('今天') || msg.includes('下午') || msg.includes('上午'))) ||
+      // 纯时间+任务关键词，识别为任务
+      (/\d+点.*?(活动|任务|提醒)/.test(msg) && !msg.includes('会议')) ||
+      /(今天|明天|后天|下周|上午|下午|晚上).*?(活动|提醒)/.test(msg)) {
+    return { type: 'schedule_add', content: message }
   }
   
   if (msg.includes('查看会议') || msg.includes('今天会议') || msg.includes('会议安排') ||
@@ -417,7 +466,7 @@ async function executeAgentAction(intent: { type: string, content: string }) {
     case 'schedule_add':
       return await addScheduleAction(content)
     case 'schedule_view':
-      return await viewScheduleAction()
+      return await viewScheduleAction(content)
     case 'schedule_confirm':
       return await handleScheduleConfirm(content)
     case 'doc_read':
@@ -451,6 +500,14 @@ async function addScheduleAction(content: string) {
     // 解析日程信息
     const scheduleInfo = parseScheduleInfo(content)
     
+    // 调试日志
+    console.log('解析日程信息:', {
+      原始内容: content,
+      任务名: scheduleInfo.title,
+      时间: scheduleInfo.time,
+      日期: scheduleInfo.date
+    })
+    
     const response = await api.post({
       url: '/api/today-tasks',
       data: {
@@ -468,6 +525,7 @@ async function addScheduleAction(content: string) {
       return `❌ 添加日程失败：${response.msg}`
     }
   } catch (error) {
+    console.error('添加日程错误:', error)
     return `❌ 添加日程时出错：${error}`
   }
 }
@@ -485,80 +543,278 @@ function parseScheduleInfo(content: string) {
   let type = 'bg-primary'
   let endDate = ''
   
-  // 提取活动类型作为标题（优先级最高）
-  if (content.includes('开会') || content.includes('会议')) {
-    title = '开会'
-  } else if (content.includes('汇报') || content.includes('报告')) {
-    title = '工作汇报'
-  } else if (content.includes('培训')) {
-    title = '培训'
-  } else if (content.includes('活动')) {
-    title = '活动'
-  } else if (content.includes('提醒')) {
-    title = '提醒事项'
-  } else if (content.includes('任务')) {
-    title = '任务'
-  } else {
-    // 尝试从具体描述中提取标题
-    const titleMatch = content.match(/添加日程[：:]?(.+?)(?:[，。]|$)/) || 
-                      content.match(/提醒我(.+?)(?:[，。]|$)/) ||
-                      content.match(/记住(.+?)(?:[，。]|$)/) ||
-                      content.match(/安排(.+?)(?:[，。]|$)/)
-    if (titleMatch) {
-      title = titleMatch[1].trim()
-      // 清理时间信息，只保留事件描述
-      title = title.replace(/\d{1,2}[：:]?\d{0,2}\s*(点|时)/, '').trim()
-      title = title.replace(/(上午|下午|晚上|中午)/, '').trim()
-      if (!title) title = '新任务'
-    }
-  }
-  
-  // 提取时间 - 更智能的时间识别
+  // 先提取时间信息（避免时间被当作任务名）
   let hour = 9
   let minute = 0
+  let timeText = '' // 保存匹配到的时间文本，用于后续移除
   
-  // 匹配 "下午3点"、"上午10点"、"晚上8点" 等格式
-  const timePattern1 = /(上午|下午|晚上|中午)?\s*(\d{1,2})\s*[：:]?\s*(\d{0,2})\s*(点|时)/
+  // 匹配时间信息 - 使用多个模式，按优先级匹配
+  // 模式1: "下午3点"、"上午10点"、"晚上8点"、"下午3点30分" 等格式
+  const timePattern1 = /(上午|下午|晚上|中午|凌晨|傍晚)\s*(\d{1,2})\s*[点:]?\s*(\d{0,2})\s*(?:分|分钟)?/
   const timeMatch1 = content.match(timePattern1)
   
   if (timeMatch1) {
-    const period = timeMatch1[1] || ''
-    hour = parseInt(timeMatch1[2])
-    minute = parseInt(timeMatch1[3] || '0')
+    timeText = timeMatch1[0] // 保存完整的时间文本
+    const period = timeMatch1[1]
+    hour = parseInt(timeMatch1[2]) || 9
+    const minuteStr = timeMatch1[3] || ''
+    minute = minuteStr ? parseInt(minuteStr) : 0
     
     // 处理上午下午
-    if (period === '下午' || period === '晚上') {
-      if (hour < 12) hour += 12
-    } else if (period === '上午' || period === '中午') {
-      if (hour === 12 && period === '上午') hour = 0
+    if (period === '下午' || period === '晚上' || period === '傍晚') {
+      if (hour > 0 && hour < 12) {
+        hour += 12
+      }
+    } else if (period === '上午' || period === '凌晨') {
+      if (hour === 12 && period === '上午') {
+        hour = 0
+      }
+    } else if (period === '中午') {
+      hour = 12
     }
     
     // 24小时制校正
-    if (hour >= 24) hour = hour - 12
+    if (hour >= 24) hour = 23
     if (hour < 0) hour = 0
+    if (minute >= 60) minute = 59
   } else {
-    // 匹配 "15:30"、"9:00" 等格式
+    // 模式2: "15:30"、"9:00" 等格式
     const timePattern2 = /(\d{1,2})[：:](\d{2})/
     const timeMatch2 = content.match(timePattern2)
     if (timeMatch2) {
-      hour = parseInt(timeMatch2[1])
-      minute = parseInt(timeMatch2[2])
+      timeText = timeMatch2[0]
+      hour = parseInt(timeMatch2[1]) || 9
+      minute = parseInt(timeMatch2[2]) || 0
+      if (hour >= 24) hour = 23
+      if (minute >= 60) minute = 59
+    } else {
+      // 模式3: 纯数字时间，如 "3点"、"15点"、"3时"
+      const timePattern3 = /(\d{1,2})\s*[点时]/
+      const timeMatch3 = content.match(timePattern3)
+      if (timeMatch3) {
+        timeText = timeMatch3[0]
+        hour = parseInt(timeMatch3[1]) || 9
+        if (hour >= 24) hour = 23
+        minute = 0
+      }
     }
   }
+  
+  // 调试日志
+  console.log('时间提取结果:', {
+    原始内容: content,
+    匹配到的时间文本: timeText,
+    小时: hour,
+    分钟: minute,
+    最终时间: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
+  })
   
   time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`
   
   // 提取日期
-  if (content.includes('明天')) {
-    date = tomorrow.toISOString().split('T')[0]
-  } else if (content.includes('后天')) {
-    const dayAfterTomorrow = new Date(today)
-    dayAfterTomorrow.setDate(today.getDate() + 2)
-    date = dayAfterTomorrow.toISOString().split('T')[0]
-  } else if (content.includes('下周')) {
-    const nextWeek = new Date(today)
-    nextWeek.setDate(today.getDate() + 7)
-    date = nextWeek.toISOString().split('T')[0]
+  let dateText = '' // 保存日期文本，用于后续移除
+  let dateMatched = false
+  
+  // 优先匹配具体的日期格式：X月X日、X月X号、YYYY年X月X日等
+  const datePatterns = [
+    { pattern: /(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})[日号]/, type: 'full' },  // 2026年1月6日、2026年1月6号
+    { pattern: /(\d{1,2})月\s*(\d{1,2})[日号]/, type: 'month-day' },  // 1月6日、1月6号、3月15日
+    { pattern: /(\d{1,2})\/(\d{1,2})/, type: 'slash' },  // 1/6、3/15（月/日格式）
+    { pattern: /(\d{4})-(\d{1,2})-(\d{1,2})/, type: 'dash' },  // 2026-01-06
+    { pattern: /(\d{4})\.(\d{1,2})\.(\d{1,2})/, type: 'dot' }  // 2026.01.06
+  ]
+  
+  for (const { pattern, type } of datePatterns) {
+    const match = pattern.exec(content)
+    if (match) {
+      dateText = match[0]
+      let year: number, month: number, day: number
+      
+      if (type === 'full') {
+        // 2026年1月6日格式
+        year = parseInt(match[1])
+        month = parseInt(match[2])
+        day = parseInt(match[3])
+      } else if (type === 'month-day') {
+        // 1月6日格式
+        const currentYear = dayjs().year()
+        year = currentYear
+        month = parseInt(match[1])
+        day = parseInt(match[2])
+        // 如果日期已过，可能是明年的日期
+        const testDate = dayjs(`${year}-${month}-${day}`)
+        if (testDate.isBefore(dayjs(), 'day')) {
+          year = currentYear + 1
+        }
+      } else if (type === 'slash') {
+        // 1/6格式（月/日）
+        const currentYear = dayjs().year()
+        year = currentYear
+        month = parseInt(match[1])
+        day = parseInt(match[2])
+        // 如果日期已过，可能是明年的日期
+        const testDate = dayjs(`${year}-${month}-${day}`)
+        if (testDate.isBefore(dayjs(), 'day')) {
+          year = currentYear + 1
+        }
+      } else if (type === 'dash' || type === 'dot') {
+        // 2026-01-06 或 2026.01.06格式
+        year = parseInt(match[1])
+        month = parseInt(match[2])
+        day = parseInt(match[3])
+      }
+      
+      // 验证日期有效性
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        try {
+          const parsedDate = dayjs(`${year}-${month}-${day}`)
+          if (parsedDate.isValid()) {
+            date = parsedDate.format('YYYY-MM-DD')
+            dateMatched = true
+            break
+          }
+        } catch (e) {
+          console.error('日期解析失败:', e)
+        }
+      }
+    }
+  }
+  
+  // 如果没有匹配到具体日期，再匹配相对日期
+  if (!dateMatched) {
+    if (content.includes('明天')) {
+      date = tomorrow.toISOString().split('T')[0]
+      dateText = '明天'
+      dateMatched = true
+    } else if (content.includes('后天')) {
+      const dayAfterTomorrow = new Date(today)
+      dayAfterTomorrow.setDate(today.getDate() + 2)
+      date = dayAfterTomorrow.toISOString().split('T')[0]
+      dateText = '后天'
+      dateMatched = true
+    } else if (content.includes('下周')) {
+      const nextWeek = new Date(today)
+      nextWeek.setDate(today.getDate() + 7)
+      date = nextWeek.toISOString().split('T')[0]
+      dateText = '下周'
+      dateMatched = true
+    } else if (content.includes('今天') || content.includes('今日')) {
+      date = today.toISOString().split('T')[0]
+      dateText = '今天'
+      dateMatched = true
+    } else if (content.includes('昨天') || content.includes('昨日')) {
+      const yesterday = new Date(today)
+      yesterday.setDate(today.getDate() - 1)
+      date = yesterday.toISOString().split('T')[0]
+      dateText = '昨天'
+      dateMatched = true
+    }
+  }
+  
+  // 调试日志：日期提取结果
+  console.log('日期提取结果:', {
+    原始内容: content,
+    匹配到的日期文本: dateText,
+    是否匹配到日期: dateMatched,
+    最终日期: date
+  })
+  
+  // 从内容中移除时间和日期信息，用于提取任务标题
+  let cleanContent = content
+  if (timeText) {
+    cleanContent = cleanContent.replace(timeText, '').trim()
+  }
+  if (dateText) {
+    // 移除匹配到的日期模式
+    cleanContent = cleanContent.replace(new RegExp(dateText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '').trim()
+  }
+  // 移除相对日期关键词
+  cleanContent = cleanContent
+    .replace(/明天|明日/g, '')
+    .replace(/后天|后日/g, '')
+    .replace(/大后天/g, '')
+    .replace(/今天|今日/g, '')
+    .replace(/昨天|昨日/g, '')
+    .replace(/下周/g, '')
+  // 移除年月日关键词
+  cleanContent = cleanContent
+    .replace(/\d{4}年/g, '')
+    .replace(/\d{1,2}月/g, '')
+    .replace(/\d{1,2}[日号]/g, '')
+  // 移除常见的时间相关词汇
+  cleanContent = cleanContent.replace(/(上午|下午|晚上|中午|点|时)/g, '').trim()
+  
+  // 优先尝试从"添加任务"、"帮我添加任务"等模式中提取任务名称
+  const taskTitlePatterns = [
+    /(?:帮我)?添加任务[：:]?\s*(?:.*?[，,]\s*)?(.+?)(?:[，。]|$)/,
+    /(?:帮我)?创建任务[：:]?\s*(?:.*?[，,]\s*)?(.+?)(?:[，。]|$)/,
+    /(?:帮我)?新建任务[：:]?\s*(?:.*?[，,]\s*)?(.+?)(?:[，。]|$)/,
+    /(?:帮我)?安排任务[：:]?\s*(?:.*?[，,]\s*)?(.+?)(?:[，。]|$)/,
+    /添加日程[：:]?\s*(?:.*?[，,]\s*)?(.+?)(?:[，。]|$)/,
+    /提醒我(.+?)(?:[，。]|$)/,
+    /记住(.+?)(?:[，。]|$)/,
+    /安排(.+?)(?:[，。]|$)/
+  ]
+  
+  let extractedTitle = ''
+  for (const pattern of taskTitlePatterns) {
+    const match = cleanContent.match(pattern)
+    if (match && match[1]) {
+      extractedTitle = match[1].trim()
+      // 移除时间信息
+      extractedTitle = extractedTitle
+        .replace(/明天|明日|后天|后日|大后天|今天|今日|昨天|昨日|下周/g, '')
+        .replace(/\d{4}年/g, '')
+        .replace(/\d{1,2}月/g, '')
+        .replace(/\d{1,2}[日号]/g, '')
+        .replace(/(上午|下午|晚上|中午|凌晨|傍晚)\s*\d{1,2}\s*[点:]?\s*\d{0,2}\s*(?:分|分钟)?/g, '')
+        .replace(/\d{1,2}[：:]?\d{0,2}\s*(点|时)/g, '')
+        .replace(/\d{1,2}[：:]?\d{2}/g, '')
+        .replace(/(上午|下午|晚上|中午|明天|后天|下周)/g, '')
+        .trim()
+      
+      if (extractedTitle && extractedTitle.length >= 2) {
+        title = extractedTitle
+        break
+      }
+    }
+  }
+  
+  // 如果没有从模式中提取到标题，尝试从清理后的内容中提取
+  if (!title || title === '新任务') {
+    // 移除"添加任务"、"帮我添加任务"等关键词
+    let remainingContent = cleanContent
+      .replace(/(?:帮我)?添加任务[：:]?/g, '')
+      .replace(/(?:帮我)?创建任务[：:]?/g, '')
+      .replace(/(?:帮我)?新建任务[：:]?/g, '')
+      .replace(/(?:帮我)?安排任务[：:]?/g, '')
+      .replace(/添加日程[：:]?/g, '')
+      .replace(/提醒我/g, '')
+      .replace(/记住/g, '')
+      .replace(/安排/g, '')
+      .replace(/任务/g, '') // 移除"任务"关键词，避免误识别
+      .trim()
+    
+    // 如果剩余内容不为空，使用它作为标题
+    if (remainingContent && remainingContent.length >= 2) {
+      title = remainingContent
+    } else {
+      // 如果还是没有，尝试匹配整个清理后的内容
+      const fallbackMatch = cleanContent.match(/(.+?)(?:[，。]|$)/)
+      if (fallbackMatch && fallbackMatch[1]) {
+        let fallbackTitle = fallbackMatch[1].trim()
+        // 移除"任务"关键词
+        fallbackTitle = fallbackTitle.replace(/任务/g, '').trim()
+        if (fallbackTitle && fallbackTitle.length >= 2) {
+          title = fallbackTitle
+        }
+      }
+    }
+  }
+  
+  // 如果标题仍然为空或只包含标点符号，使用默认标题
+  if (!title || title.length < 2 || /^[，。、；：！？\s]+$/.test(title)) {
+    title = '新任务'
   }
   
   // 提取优先级
@@ -573,40 +829,179 @@ function parseScheduleInfo(content: string) {
   return { title, time, date, type, endDate }
 }
 
+// 解析查询日期（从消息中提取日期信息）
+function parseQueryDate(content: string): string {
+  const msg = content.toLowerCase()
+  const today = dayjs()
+  
+  // 优先匹配具体的日期格式
+  const datePatterns = [
+    { pattern: /(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})[日号]/, type: 'full' },
+    { pattern: /(\d{1,2})月\s*(\d{1,2})[日号]/, type: 'month-day' },
+    { pattern: /(\d{1,2})\/(\d{1,2})/, type: 'slash' },
+    { pattern: /(\d{4})-(\d{1,2})-(\d{1,2})/, type: 'dash' },
+    { pattern: /(\d{4})\.(\d{1,2})\.(\d{1,2})/, type: 'dot' }
+  ]
+  
+  for (const { pattern, type } of datePatterns) {
+    const match = pattern.exec(content)
+    if (match) {
+      let year: number, month: number, day: number
+      
+      if (type === 'full') {
+        year = parseInt(match[1])
+        month = parseInt(match[2])
+        day = parseInt(match[3])
+      } else if (type === 'month-day') {
+        const currentYear = today.year()
+        year = currentYear
+        month = parseInt(match[1])
+        day = parseInt(match[2])
+        const testDate = dayjs(`${year}-${month}-${day}`)
+        if (testDate.isBefore(today, 'day')) {
+          year = currentYear + 1
+        }
+      } else if (type === 'slash') {
+        const currentYear = today.year()
+        year = currentYear
+        month = parseInt(match[1])
+        day = parseInt(match[2])
+        const testDate = dayjs(`${year}-${month}-${day}`)
+        if (testDate.isBefore(today, 'day')) {
+          year = currentYear + 1
+        }
+      } else if (type === 'dash' || type === 'dot') {
+        year = parseInt(match[1])
+        month = parseInt(match[2])
+        day = parseInt(match[3])
+      }
+      
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        try {
+          const parsedDate = dayjs(`${year}-${month}-${day}`)
+          if (parsedDate.isValid()) {
+            return parsedDate.format('YYYY-MM-DD')
+          }
+        } catch (e) {
+          console.error('日期解析失败:', e)
+        }
+      }
+    }
+  }
+  
+  // 匹配相对日期
+  if (msg.includes('明天') || msg.includes('明日')) {
+    return today.add(1, 'day').format('YYYY-MM-DD')
+  } else if (msg.includes('后天') || msg.includes('后日')) {
+    return today.add(2, 'day').format('YYYY-MM-DD')
+  } else if (msg.includes('大后天')) {
+    return today.add(3, 'day').format('YYYY-MM-DD')
+  } else if (msg.includes('下周')) {
+    return today.add(7, 'day').format('YYYY-MM-DD')
+  } else if (msg.includes('昨天') || msg.includes('昨日')) {
+    return today.subtract(1, 'day').format('YYYY-MM-DD')
+  }
+  
+  // 默认返回今天
+  return today.format('YYYY-MM-DD')
+}
+
 // 查看日程
-async function viewScheduleAction() {
+async function viewScheduleAction(content?: string) {
   try {
-    const response = await api.get({ url: '/api/today-tasks' }) as any
+    // 解析查询日期
+    const queryDate = content ? parseQueryDate(content) : dayjs().format('YYYY-MM-DD')
+    const today = dayjs().format('YYYY-MM-DD')
     
-    if (response.code === 0 && response.tasks) {
-      const tasks = response.tasks
-      if (tasks.length === 0) {
-        return '📅 今天暂无日程安排'
-      }
-      
-      const today = new Date().toISOString().split('T')[0]
-      const todayTasks = tasks.filter((task: any) => task.date === today)
-      
-      if (todayTasks.length === 0) {
-        return '📅 今天暂无会议安排'
-      }
-      
-      let result = '📅 今日会议安排：\n\n'
-      todayTasks.forEach((task: any, index: number) => {
-        const status = task.completed ? '✅' : '⏰'
-        const priority = task.type === 'bg-danger' ? '🔴' : 
-                        task.type === 'bg-warning' ? '🟡' : 
-                        task.type === 'bg-success' ? '🟢' : '🔵'
-        result += `${index + 1}. ${status} ${priority} ${task.content}`
-        if (task.time) result += ` (${task.time})`
-        result += '\n'
+    // 获取所有任务
+    const taskResponse = await api.get({ url: '/api/today-tasks' }) as any
+    
+    // 格式化日期显示
+    const dateDisplay = dayjs(queryDate).format('M月D日')
+    const dateTitle = queryDate === today ? '今日' : dateDisplay
+    
+    let result = `📅 ${dateTitle}安排：\n\n`
+    let hasContent = false
+    
+    // 处理任务
+    if (taskResponse.code === 0 && taskResponse.tasks) {
+      // 过滤指定日期的任务
+      const targetTasks = taskResponse.tasks.filter((task: any) => {
+        if (!task.date) return false
+        // 处理不同的日期格式
+        let taskDateStr = String(task.date).trim()
+        if (taskDateStr.includes(' ')) {
+          taskDateStr = taskDateStr.split(' ')[0]
+        }
+        if (taskDateStr.includes('T')) {
+          taskDateStr = taskDateStr.split('T')[0]
+        }
+        taskDateStr = taskDateStr.slice(0, 10)
+        const taskDate = dayjs(taskDateStr).format('YYYY-MM-DD')
+        return taskDate === queryDate
       })
       
-      return result
-    } else {
-      return '❌ 获取日程失败'
+      if (targetTasks.length > 0) {
+        hasContent = true
+        result += '📋 任务：\n'
+        targetTasks.forEach((task: any, index: number) => {
+          const status = task.completed ? '✅' : '⏰'
+          const priority = task.type === 'bg-danger' ? '🔴' : 
+                          task.type === 'bg-warning' ? '🟡' : 
+                          task.type === 'bg-success' ? '🟢' : '🔵'
+          result += `  ${index + 1}. ${status} ${priority} ${task.content}`
+          if (task.time) result += ` (${task.time})`
+          result += '\n'
+        })
+        result += '\n'
+      }
     }
+    
+    // 处理会议（需要从会议接口获取）
+    try {
+      const meetingResponse = await api.get({ 
+        url: '/api/meetings/list', 
+        params: { page: 1, pageSize: 100 } 
+      }) as any
+      
+      if (meetingResponse.code === 0 && meetingResponse.data?.list) {
+        const targetMeetings = meetingResponse.data.list.filter((meeting: any) => {
+          if (!meeting.time) return false
+          let meetingDateStr = String(meeting.time).trim()
+          if (meetingDateStr.includes('T')) {
+            meetingDateStr = meetingDateStr.split('T')[0]
+          }
+          if (meetingDateStr.includes(' ')) {
+            meetingDateStr = meetingDateStr.split(' ')[0]
+          }
+          meetingDateStr = meetingDateStr.slice(0, 10)
+          const meetingDate = dayjs(meetingDateStr).format('YYYY-MM-DD')
+          return meetingDate === queryDate
+        })
+        
+        if (targetMeetings.length > 0) {
+          hasContent = true
+          result += '📅 会议：\n'
+          targetMeetings.forEach((meeting: any, index: number) => {
+            const timeStr = meeting.time ? dayjs(meeting.time).format('HH:mm') : ''
+            result += `  ${index + 1}. 📅 ${meeting.title}`
+            if (timeStr) result += ` (${timeStr})`
+            if (meeting.location) result += ` @ ${meeting.location}`
+            result += '\n'
+          })
+        }
+      }
+    } catch (e) {
+      console.error('获取会议失败:', e)
+    }
+    
+    if (!hasContent) {
+      return `📅 ${dateTitle}暂无日程安排，您可以添加新的任务或会议。`
+    }
+    
+    return result
   } catch (error) {
+    console.error('查看日程错误:', error)
     return `❌ 查看日程时出错：${error}`
   }
 }
@@ -733,25 +1128,76 @@ function parseMeetingInfo(content: string) {
   let title = '新会议'
   let host = '我'
   let location = '会议室A'
-  const now = new Date()
-  let time = new Date(now.getTime() + 60 * 60 * 1000).toISOString().slice(0, 16) // 默认1小时后
+  const today = dayjs()
+  let date = today.format('YYYY-MM-DD')
+  let time = today.format('HH:mm')
   
-  // 提取会议主题
-  const titleMatch = content.match(/安排会议[：:]?(.+?)(?:[，。]|$)/) ||
-                     content.match(/创建会议[：:]?(.+?)(?:[，。]|$)/) ||
-                     content.match(/会议[：:]?(.+?)(?:[，。]|$)/)
-  if (titleMatch) {
-    title = titleMatch[1].trim()
+  // 先提取日期和时间信息（使用与任务相同的解析逻辑）
+  const scheduleInfo = parseScheduleInfo(content)
+  date = scheduleInfo.date
+  time = scheduleInfo.time
+  
+  // 提取会议主题 - 优先从"添加会议:"、"创建会议:"等模式中提取
+  let cleanContent = content
+  // 移除日期和时间相关的关键词
+  cleanContent = cleanContent
+    .replace(/添加会议[：:]?/g, '')
+    .replace(/创建会议[：:]?/g, '')
+    .replace(/新建会议[：:]?/g, '')
+    .replace(/安排会议[：:]?/g, '')
+    .replace(/帮我添加会议[：:]?/g, '')
+    .replace(/帮我创建会议[：:]?/g, '')
+    .replace(/明天|明日|后天|后日|大后天|今天|今日|昨天|昨日|下周/g, '')
+    .replace(/\d{4}年/g, '')
+    .replace(/\d{1,2}月/g, '')
+    .replace(/\d{1,2}[日号]/g, '')
+    .replace(/(上午|下午|晚上|中午|凌晨|傍晚)\s*\d{1,2}\s*[点:]?\s*\d{0,2}\s*(?:分|分钟)?/g, '')
+    .replace(/\d{1,2}[：:]?\d{0,2}\s*(点|时)/g, '')
+    .replace(/\d{1,2}[：:]?\d{2}/g, '')
+    .replace(/[，。、；：！？\s]+/g, ' ')
+    .trim()
+  
+  // 尝试提取会议标题
+  // 模式1: "添加会议: 标题" 或 "添加会议: 时间, 标题"
+  const titlePattern1 = /(?:添加|创建|新建|安排)会议[：:]?\s*(?:.*?[，,]\s*)?(.+?)(?:[，。]|$)/
+  const match1 = content.match(titlePattern1)
+  if (match1 && match1[1]) {
+    let extractedTitle = match1[1].trim()
+    // 移除时间信息
+    extractedTitle = extractedTitle
+      .replace(/明天|明日|后天|后日|大后天|今天|今日|昨天|昨日|下周/g, '')
+      .replace(/\d{4}年/g, '')
+      .replace(/\d{1,2}月/g, '')
+      .replace(/\d{1,2}[日号]/g, '')
+      .replace(/(上午|下午|晚上|中午|凌晨|傍晚)\s*\d{1,2}\s*[点:]?\s*\d{0,2}\s*(?:分|分钟)?/g, '')
+      .replace(/\d{1,2}[：:]?\d{0,2}\s*(点|时)/g, '')
+      .replace(/\d{1,2}[：:]?\d{2}/g, '')
+      .trim()
+    if (extractedTitle && extractedTitle.length > 0) {
+      title = extractedTitle
+    }
+  } else if (cleanContent && cleanContent.length > 0) {
+    // 如果清理后的内容不为空，使用清理后的内容作为标题
+    title = cleanContent
+  }
+  
+  // 如果标题为空或只包含标点符号，使用默认值
+  if (!title || title.length < 2 || /^[，。、；：！？\s]+$/.test(title)) {
+    title = '新会议'
   }
   
   // 提取地点
-  const locationMatch = content.match(/在(.+?)(?:举行|开会|召开)/) ||
-                        content.match(/地点[：:]?(.+?)(?:[，。]|$)/)
-  if (locationMatch) {
+  const locationMatch = content.match(/在(.+?)(?:举行|开会|召开|进行)/) ||
+                        content.match(/地点[：:]?(.+?)(?:[，。]|$)/) ||
+                        content.match(/会议室[：:]?(.+?)(?:[，。]|$)/)
+  if (locationMatch && locationMatch[1]) {
     location = locationMatch[1].trim()
   }
   
-  return { title, host, time, location }
+  // 组合日期和时间
+  const fullDateTime = `${date} ${time}`
+  
+  return { title, host, time: fullDateTime, location }
 }
 
 // 查看会议
@@ -937,8 +1383,112 @@ function parseScheduleFromConfirm(content: string) {
   return { title, time }
 }
 
+// 查找最近上传的文件
+function findRecentFile(): { url: string; name: string } | null {
+  // 从历史消息中查找最近的文件消息
+  for (let i = history.value.length - 1; i >= 0; i--) {
+    const msg = history.value[i]
+    if (msg.from === 'user' && msg.content) {
+      // 检查消息中是否包含文件链接
+      const fileMatch = msg.content.match(/href=["']([^"']*\/uploads\/assistant\/[^"']+)["']/)
+      if (fileMatch) {
+        const fileNameMatch = msg.content.match(/>([^<]+\.(xlsx|xls|docx|doc|pdf|txt|pptx|ppt|csv))</i)
+        return {
+          url: fileMatch[1],
+          name: fileNameMatch ? fileNameMatch[1] : '文件'
+        }
+      }
+    }
+  }
+  return null
+}
+
 async function ragSearch() {
   if (!ragQuestion.value) return
+  
+  // 如果没有会话，自动创建新会话
+  if (!currentSessionId.value || sessions.value.length === 0) {
+    createNewSession()
+  }
+  
+  // 检查是否要求分析文件
+  const analyzeFilePatterns = [
+    /分析(上面|这个|刚才|最近|上传的)?(文件|附件|文档)/i,
+    /帮我(分析|看看|解读)(一下)?(这个|上面|刚才|最近|上传的)?(文件|附件|文档)/i,
+    /(这个|上面|刚才|最近|上传的)?(文件|附件|文档)(的内容|情况|信息)/i
+  ]
+  
+  const shouldAnalyzeFile = analyzeFilePatterns.some(pattern => pattern.test(ragQuestion.value))
+  
+  if (shouldAnalyzeFile) {
+    // 查找最近的文件
+    const recentFile = findRecentFile()
+    if (recentFile) {
+      // 提取问题（如果有）
+      const question = ragQuestion.value.replace(/分析(上面|这个|刚才|最近|上传的)?(文件|附件|文档)/i, '').trim()
+      
+      // 添加用户消息
+      const userMsg: Message = {
+        id: Date.now(),
+        content: String(ragQuestion.value || ''),
+        from: 'user',
+        time: getNowTime(),
+        avatar: userAvatar.value,
+        sessionId: currentSessionId.value
+      }
+      history.value.push(userMsg)
+      updateSessionHistory()
+      
+      // 分析文件
+      await analyzeFile(recentFile.url, recentFile.name, question)
+      ragQuestion.value = ''
+      return
+    } else if (currentFileUrl.value) {
+      // 如果当前有选中的文件，使用它
+      const question = ragQuestion.value.replace(/分析(上面|这个|刚才|最近|上传的)?(文件|附件|文档)/i, '').trim()
+      
+      const userMsg: Message = {
+        id: Date.now(),
+        content: String(ragQuestion.value || ''),
+        from: 'user',
+        time: getNowTime(),
+        avatar: userAvatar.value,
+        sessionId: currentSessionId.value
+      }
+      history.value.push(userMsg)
+      updateSessionHistory()
+      
+      await analyzeFile(currentFileUrl.value, currentFileName.value, question)
+      ragQuestion.value = ''
+      return
+    } else {
+      // 没有找到文件，提示用户
+      const userMsg: Message = {
+        id: Date.now(),
+        content: String(ragQuestion.value || ''),
+        from: 'user',
+        time: getNowTime(),
+        avatar: userAvatar.value,
+        sessionId: currentSessionId.value
+      }
+      history.value.push(userMsg)
+      updateSessionHistory()
+      
+      const botMsg: Message = {
+        id: Date.now() + 1,
+        content: '抱歉，我没有找到您要分析的文件。请先上传文件，或者直接点击文件进行分析。',
+        from: 'bot',
+        time: getNowTime(),
+        avatar: botAvatar,
+        sessionId: currentSessionId.value
+      }
+      history.value.push(botMsg)
+      updateSessionHistory()
+      ragQuestion.value = ''
+      ragLoading.value = false
+      return
+    }
+  }
   
   ragLoading.value = true
   const userMsg: Message = {
@@ -967,7 +1517,7 @@ async function ragSearch() {
         // 添加机器人回复
         const botMsg: Message = {
           id: Date.now() + 1,
-          content: botReply,
+          content: String(botReply || ''),
           from: 'bot',
           time: getNowTime(),
           avatar: botAvatar,
@@ -989,12 +1539,109 @@ async function ragSearch() {
   isStreaming.value = true
   
   try {
+    // 构建请求体，如果当前有图片URL，则包含图片
+    const requestBody: any = { 
+      message: ragQuestion.value, 
+      sessionId: currentSessionId.value 
+    }
+    
+    // 如果有待分析的图片，添加到请求中
+    if (currentImageUrl.value) {
+      requestBody.image_url = currentImageUrl.value
+    }
+    
     const response = await fetch('/api/assistant/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: ragQuestion.value, sessionId: currentSessionId.value }),
+      headers: { 
+        'Content-Type': 'application/json',
+        ...(headers.value as Record<string, string>)
+      },
+      body: JSON.stringify(requestBody),
     })
     
+    // 检查响应类型
+    const contentType = response.headers.get('content-type') || ''
+    
+    // 如果是图片分析（有image_url），后端返回JSON格式
+    if (currentImageUrl.value) {
+      try {
+        const data = await response.json()
+        
+        if (data.code === 0 && data.data?.reply) {
+          // 确保reply是字符串，处理各种可能的格式
+          let replyText = ''
+          if (typeof data.data.reply === 'string') {
+            replyText = data.data.reply
+          } else if (typeof data.data.reply === 'object') {
+            // 如果是对象，尝试转换为字符串
+            try {
+              replyText = JSON.stringify(data.data.reply, null, 2)
+            } catch {
+              replyText = String(data.data.reply)
+            }
+          } else {
+            replyText = String(data.data.reply || '')
+          }
+          
+          streamingContent.value = replyText
+          
+          const botMsg: Message = {
+            id: Date.now() + 1,
+            content: replyText,
+            from: 'bot',
+            time: getNowTime(),
+            avatar: botAvatar,
+            sessionId: currentSessionId.value
+          }
+          history.value.push(botMsg)
+          updateSessionHistory()
+          ragQuestion.value = ''
+          currentImageUrl.value = ''  // 清空图片URL
+          ragLoading.value = false
+          isStreaming.value = false
+          return
+        } else {
+          const errorMsg = String(data.msg || data.error?.message || '图片分析失败')
+          ElMessage.error(errorMsg)
+          
+          const errorBotMsg: Message = {
+            id: Date.now() + 1,
+            content: `图片分析失败：${errorMsg}`,
+            from: 'bot',
+            time: getNowTime(),
+            avatar: botAvatar,
+            sessionId: currentSessionId.value
+          }
+          history.value.push(errorBotMsg)
+          updateSessionHistory()
+          currentImageUrl.value = ''
+          ragLoading.value = false
+          isStreaming.value = false
+          return
+        }
+      } catch (jsonError) {
+        console.error('解析JSON响应失败:', jsonError)
+        const errorMsg = '图片分析失败：响应格式错误'
+        ElMessage.error(errorMsg)
+        
+        const errorBotMsg: Message = {
+          id: Date.now() + 1,
+          content: errorMsg,
+          from: 'bot',
+          time: getNowTime(),
+          avatar: botAvatar,
+          sessionId: currentSessionId.value
+        }
+        history.value.push(errorBotMsg)
+        updateSessionHistory()
+        currentImageUrl.value = ''
+        ragLoading.value = false
+        isStreaming.value = false
+        return
+      }
+    }
+    
+    // 纯文本对话使用流式响应
     if (!response.body) throw new Error('无流式响应')
     
     const reader = response.body.getReader()
@@ -1020,11 +1667,13 @@ async function ragSearch() {
       }
     } catch {}
     
-    streamingContent.value = reply
+    // 确保reply是字符串
+    const replyText = String(reply || '')
+    streamingContent.value = replyText
     
     const botMsg: Message = {
       id: Date.now() + 1,
-      content: reply,
+      content: replyText,
       from: 'bot',
       time: getNowTime(),
       avatar: botAvatar,
@@ -1033,8 +1682,25 @@ async function ragSearch() {
     history.value.push(botMsg)
     updateSessionHistory()
     ragQuestion.value = ''
-  } catch (e) {
-    ElMessage.error('对话失败')
+    currentImageUrl.value = ''  // 清空图片URL
+  } catch (e: any) {
+    console.error('对话失败:', e)
+    const errorMsg = e?.message || '对话失败，请重试'
+    ElMessage.error(errorMsg)
+    
+    // 添加错误消息到聊天记录
+    const errorBotMsg: Message = {
+      id: Date.now() + 1,
+      content: `对话失败：${String(errorMsg)}`,
+      from: 'bot',
+      time: getNowTime(),
+      avatar: botAvatar,
+      sessionId: currentSessionId.value
+    }
+    history.value.push(errorBotMsg)
+    updateSessionHistory()
+    
+    currentImageUrl.value = ''  // 出错时也清空
   }
   
   ragLoading.value = false
@@ -1067,14 +1733,19 @@ function deleteSession(id: string) {
   if (idx !== -1) {
     sessions.value.splice(idx, 1)
     
+    // 保存到localStorage
+    localStorage.setItem('deepseek_sessions', JSON.stringify(sessions.value))
+    
     // 如果删除的是当前会话，切换到其他会话
     if (currentSessionId.value === id) {
       if (sessions.value.length > 0) {
+        // 切换到第一个会话
         currentSessionId.value = sessions.value[0].id
         history.value = sessions.value[0].history
       } else {
-        // 如果没有会话了，创建新会话
-        createNewSession()
+        // 如果没有会话了，清空当前会话和历史记录
+        currentSessionId.value = ''
+        history.value = []
       }
     }
     
@@ -1223,7 +1894,8 @@ function sendMsgWithAttachment(url: string, type: string, originalName?: string)
   
   // 添加附件信息
   if (type === 'image') {
-    userMsg.content = `<img src="${url}" style="max-width:200px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1);" />`
+    userMsg.content = `<img src="${url}" style="max-width:300px; max-height:300px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.1); cursor:pointer;" onclick="window.open('${url}', '_blank')" />`
+    userMsg.imageUrl = url  // 保存图片URL，用于发送给AI分析
   } else {
     userMsg.content = `<div style="padding:10px; border:1px solid #e0e0e0; border-radius:8px; background:#f5f5f5;">
       <div style="font-size:14px; color:#666;">📎 附件</div>
@@ -1237,10 +1909,130 @@ function sendMsgWithAttachment(url: string, type: string, originalName?: string)
   
   // 如果是图片，发送给AI进行分析
   if (type === 'image') {
-    ragQuestion.value = `请分析这张图片：${originalName}`
+    // 保存当前图片URL，用于后续发送
+    currentImageUrl.value = url
+    ragQuestion.value = `请分析这张图片`
     ragSearch()
+  } else if (type === 'document' || type === 'text') {
+    // 如果是文档文件，保存文件信息并自动分析
+    currentFileUrl.value = url
+    currentFileName.value = originalName || '文件'
+    // 延迟一下再分析，确保文件已保存
+    setTimeout(() => {
+      analyzeFile(url, originalName || '文件', '')
+    }, 500)
   } else {
-    ElMessage.success('附件上传成功')
+    // 其他类型文件也保存信息，但不自动分析
+    currentFileUrl.value = url
+    currentFileName.value = originalName || '文件'
+    ElMessage.success('附件上传成功，您可以输入"分析上面文件"来分析该文件')
+  }
+}
+
+// 分析文件内容
+async function analyzeFile(fileUrl: string, fileName: string, question: string = '') {
+  // 如果没有会话，自动创建新会话
+  if (!currentSessionId.value || sessions.value.length === 0) {
+    createNewSession()
+  }
+  
+  ragLoading.value = true
+  
+  // 显示分析中的提示
+  const loadingMsg: Message = {
+    id: Date.now() + 1,
+    content: '正在分析文件内容，请稍候...',
+    from: 'bot',
+    time: getNowTime(),
+    avatar: botAvatar,
+    sessionId: currentSessionId.value
+  }
+  history.value.push(loadingMsg)
+  updateSessionHistory()
+  
+  try {
+    const response = await api.post<{ code: number; data?: { reply: string; content_length?: number }; msg?: string }>({
+      url: '/api/assistant/analyze-file',
+      data: {
+        file_url: fileUrl,
+        question: question  // 可以留空，使用默认分析提示，也可以传入自定义问题
+      }
+    })
+    
+    // 移除加载提示
+    const loadingIndex = history.value.findIndex(msg => msg.id === loadingMsg.id)
+    if (loadingIndex !== -1) {
+      history.value.splice(loadingIndex, 1)
+    }
+    
+    if (response.code === 0 && response.data?.reply) {
+      // 添加AI回复消息，确保content是字符串
+      const replyText = String(response.data.reply || '分析完成，但未返回内容')
+      const botMsg: Message = {
+        id: Date.now() + 2,
+        content: replyText,
+        from: 'bot',
+        time: getNowTime(),
+        avatar: botAvatar,
+        sessionId: currentSessionId.value
+      }
+      history.value.push(botMsg)
+      updateSessionHistory()
+      ElMessage.success('文件分析完成')
+      
+      // 清空文件URL
+      currentFileUrl.value = ''
+      currentFileName.value = ''
+    } else {
+      const errorMsg = String(response.msg || '文件分析失败')
+      ElMessage.error(errorMsg)
+      
+      // 添加错误消息到聊天记录
+      const errorBotMsg: Message = {
+        id: Date.now() + 2,
+        content: `文件分析失败：${errorMsg}`,
+        from: 'bot',
+        time: getNowTime(),
+        avatar: botAvatar,
+        sessionId: currentSessionId.value
+      }
+      history.value.push(errorBotMsg)
+      updateSessionHistory()
+    }
+  } catch (error: any) {
+    // 移除加载提示
+    const loadingIndex = history.value.findIndex(msg => msg.id === loadingMsg.id)
+    if (loadingIndex !== -1) {
+      history.value.splice(loadingIndex, 1)
+    }
+    
+    console.error('文件分析失败:', error)
+    
+    // 获取详细的错误信息
+    let errorMessage = '文件分析失败，请重试'
+    if (error?.response?.data?.msg) {
+      errorMessage = String(error.response.data.msg)
+    } else if (error?.message) {
+      errorMessage = `文件分析失败：${String(error.message)}`
+    } else if (error?.response?.status) {
+      errorMessage = `文件分析失败：服务器错误 ${error.response.status}`
+    }
+    
+    ElMessage.error(errorMessage)
+    
+    // 添加错误消息到聊天记录
+    const errorBotMsg: Message = {
+      id: Date.now() + 2,
+      content: errorMessage,
+      from: 'bot',
+      time: getNowTime(),
+      avatar: botAvatar,
+      sessionId: currentSessionId.value
+    }
+    history.value.push(errorBotMsg)
+    updateSessionHistory()
+  } finally {
+    ragLoading.value = false
   }
 }
 
@@ -1300,6 +2092,28 @@ function handleOutsideClick(event: MouseEvent) {
   flex: 1;
   overflow-y: auto;
   background: var(--el-bg-color);
+}
+
+.empty-sessions {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: var(--el-text-color-secondary);
+}
+
+.empty-text {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: var(--el-text-color-regular);
+}
+
+.empty-hint {
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
 }
 
 .session-item-flex {
@@ -1394,6 +2208,38 @@ function handleOutsideClick(event: MouseEvent) {
   flex-direction: column;
   gap: 18px;
   background: var(--el-bg-color-page);
+  position: relative;
+}
+
+.empty-chat {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--el-text-color-secondary);
+  text-align: center;
+}
+
+.empty-chat-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-chat-text {
+  font-size: 18px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: var(--el-text-color-regular);
+}
+
+.empty-chat-hint {
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
 }
 
 .chat-msg {

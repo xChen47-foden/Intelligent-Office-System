@@ -250,10 +250,16 @@
         ElMessage.error(res.data.msg || '注册失败')
       }
     } catch (error: any) {
+      console.error('注册失败:', error)
+      // FastAPI 的 HTTPException 返回格式为 {detail: "错误信息"}
       if (error?.response?.data?.detail) {
         ElMessage.error(error.response.data.detail)
+      } else if (error?.response?.data?.msg) {
+        ElMessage.error(error.response.data.msg)
+      } else if (error?.message) {
+        ElMessage.error(error.message)
       } else {
-        ElMessage.error('注册失败')
+        ElMessage.error('注册失败，请检查网络连接或稍后重试')
       }
     } finally {
       loading.value = false

@@ -1,0 +1,32 @@
+{
+  "name": "qxc-backend",
+  "version": "1.0.0",
+  "description": "QXC Backend Services",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "default-passive-events": "^4.0.0",
+    "express": "^4.18.2",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.22",
+    "markdown-it": "^14.1.0",
+    "markdown-it-katex": "^2.0.3",
+    "mitt": "^3.0.1",
+    "nprogress": "^0.2.0",
+    "qrcode.vue": "^3.6.0",
+    "sqlite3": "^5.1.6",
+    "vue-draggable-plus": "^0.6.0",
+    "vue-i18n": "^11.1.12",
+    "vue3-count-to": "^1.1.2",
+    "xlsx": "^0.18.5"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+}
+

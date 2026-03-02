@@ -78,7 +78,7 @@
           transition: color 0.3s ease;
         }
 
-        // 深色模式下的输入框样式
+        // 输入框样式
         :deep(.el-input__wrapper) {
           background: var(--art-main-bg-color);
           border: 1px solid var(--art-border-color);
@@ -194,6 +194,220 @@
 
     .text-wrap {
       bottom: 80px;
+    }
+  }
+}
+
+// 深色模式样式
+html.dark {
+  .register {
+    .right-wrap {
+      background: #0a0e1a;
+      background-image: linear-gradient(180deg, #0a0e1a 0%, #141b2d 100%);
+      
+      .login-wrap {
+        background: rgba(20, 25, 40, 0.95);
+        backdrop-filter: blur(20px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 
+                    0 0 0 1px rgba(255, 255, 255, 0.08),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        
+        .form {
+          .title {
+            color: rgba(255, 255, 255, 0.95) !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+          }
+          
+          .sub-title {
+            color: rgba(255, 255, 255, 0.75) !important;
+          }
+          
+          .footer {
+            color: rgba(255, 255, 255, 0.75);
+            
+            p {
+              color: rgba(255, 255, 255, 0.75);
+            }
+            
+            a {
+              color: var(--el-color-primary);
+              
+              &:hover {
+                color: var(--el-color-primary-light-3);
+              }
+            }
+          }
+        }
+      }
+      
+      .theme-toggle .btn {
+        background: var(--art-main-bg-color);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        
+        i {
+          color: rgba(255, 255, 255, 0.8);
+        }
+        
+        &:hover {
+          background: rgba(255, 255, 255, 0.05);
+          border-color: var(--el-color-primary);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+          
+          i {
+            color: var(--el-color-primary);
+          }
+        }
+      }
+      
+      // 深色模式下的输入框
+      .login-wrap .form {
+        :deep(.el-input__wrapper) {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.15);
+          transition: all 0.3s ease;
+          
+          &:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.25);
+          }
+          
+          &.is-focus {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: var(--el-color-primary);
+            box-shadow: 0 0 0 3px rgba(var(--el-color-primary-rgb), 0.15),
+                        inset 0 1px 2px rgba(0, 0, 0, 0.1);
+          }
+        }
+        
+        :deep(.el-input__inner) {
+          color: rgba(255, 255, 255, 0.95);
+          
+          &::placeholder {
+            color: rgba(255, 255, 255, 0.45);
+          }
+        }
+        
+        :deep(.el-input__suffix) {
+          .el-icon {
+            color: rgba(255, 255, 255, 0.6);
+            
+            &:hover {
+              color: rgba(255, 255, 255, 0.9);
+            }
+          }
+        }
+        
+        :deep(.el-select .el-input__wrapper) {
+          background: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.15);
+          
+          &:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.25);
+          }
+        }
+        
+        :deep(.el-select__popper) {
+          background: rgba(20, 25, 40, 0.98);
+          backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+          
+          .el-select-dropdown__item {
+            color: rgba(255, 255, 255, 0.9);
+            
+            &:hover {
+              background: rgba(255, 255, 255, 0.12);
+            }
+            
+            &.selected {
+              color: var(--el-color-primary);
+              background: rgba(var(--el-color-primary-rgb), 0.1);
+            }
+          }
+        }
+        
+        :deep(.el-checkbox__label) {
+          color: rgba(255, 255, 255, 0.85);
+        }
+        
+        :deep(.el-checkbox__inner) {
+          background-color: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.25);
+          
+          &:hover {
+            border-color: rgba(255, 255, 255, 0.4);
+          }
+        }
+        
+        :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+          background-color: var(--el-color-primary);
+          border-color: var(--el-color-primary);
+        }
+        
+        .privacy-policy {
+          :deep(.el-checkbox__label) {
+            color: rgba(255, 255, 255, 0.85) !important;
+          }
+          
+          a {
+            color: var(--el-color-primary);
+            
+            &:hover {
+              color: var(--el-color-primary-light-3);
+            }
+          }
+        }
+        
+        // 深色模式下的按钮样式
+        :deep(.el-button--primary) {
+          background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
+          border-color: var(--el-color-primary);
+          box-shadow: 0 4px 12px rgba(var(--el-color-primary-rgb), 0.3);
+          
+          &:hover {
+            background: linear-gradient(135deg, var(--el-color-primary-light-3) 0%, var(--el-color-primary) 100%);
+            border-color: var(--el-color-primary-light-3);
+            box-shadow: 0 6px 16px rgba(var(--el-color-primary-rgb), 0.4);
+            transform: translateY(-1px);
+          }
+          
+          &:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(var(--el-color-primary-rgb), 0.3);
+          }
+        }
+        
+        // 深色模式下的普通按钮（获取验证码按钮）
+        :deep(.el-button:not(.el-button--primary)) {
+          background-color: rgba(255, 255, 255, 0.08);
+          border-color: rgba(255, 255, 255, 0.2);
+          color: rgba(255, 255, 255, 0.85);
+          
+          &:hover {
+            background-color: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.3);
+            color: rgba(255, 255, 255, 0.95);
+          }
+          
+          &:disabled {
+            background-color: rgba(255, 255, 255, 0.03);
+            border-color: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.4);
+          }
+        }
+        
+        // 表单标签的深色模式样式
+        :deep(.el-form-item__label) {
+          color: rgba(255, 255, 255, 0.85);
+        }
+      }
+    }
+    
+    .left-wrap {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
     }
   }
 }

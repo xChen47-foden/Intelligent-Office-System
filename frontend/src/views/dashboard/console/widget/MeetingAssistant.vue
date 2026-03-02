@@ -1,7 +1,7 @@
 <template>
   <div class="meeting-assistant art-custom-card">
     <div class="header">
-      <span class="title">智能会议助手</span>
+      <span class="title">智能日程助手</span>
     </div>
     <div class="stats-content">
       <div class="stat-item">
